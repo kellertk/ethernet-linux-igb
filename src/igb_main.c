@@ -12142,7 +12142,7 @@ static int __igb_shutdown(struct pci_dev *pdev, bool *enable_wake,
 	struct igb_adapter *adapter = netdev_priv(netdev);
 	struct e1000_hw *hw = &adapter->hw;
 	u32 ctrl, rctl, status;
-	u16 pci_word, nvm_word;
+	u16 pci_word;
 	u32 wufc = runtime ? E1000_WUFC_LNKC : adapter->wol;
 #ifdef CONFIG_PM
 	int retval = 0;
@@ -12189,14 +12189,6 @@ static int __igb_shutdown(struct pci_dev *pdev, bool *enable_wake,
 		wuc |= E1000_WUC_PME_EN;
 		E1000_WRITE_REG(hw, E1000_WUC, wuc);
 		E1000_WRITE_REG(hw, E1000_WUFC, wufc);
-
-		if (hw->mac.type == e1000_i210) {
-			/* enable WoL via EEPROM */
-			e1000_read_nvm(hw, E1000_NVM_CTRL_WORD_2, 1, &nvm_word);
-			nvm_word |= E1000_NVM_APMPME_ENABLE;
-			e1000_write_nvm(hw, E1000_NVM_CTRL_WORD_2, 1, &nvm_word);
-			e1000_update_nvm_checksum(hw);
-		}
 	} else {
 		ctrl = E1000_READ_REG(hw, E1000_CTRL);
 		ctrl &= ~E1000_CTRL_ADVD3WUC;
@@ -12208,12 +12200,6 @@ static int __igb_shutdown(struct pci_dev *pdev, bool *enable_wake,
 			e1000_read_pci_cfg(hw, E1000_PCI_PMCSR, &pci_word);
 			pci_word &= ~E1000_PCI_PMCSR_PME_EN;
 			e1000_write_pci_cfg(hw, E1000_PCI_PMCSR, &pci_word);
-
-			/* disable WoL via EEPROM */
-			e1000_read_nvm(hw, E1000_NVM_CTRL_WORD_2, 1, &nvm_word);
-			nvm_word &= ~E1000_NVM_APMPME_ENABLE;
-			e1000_write_nvm(hw, E1000_NVM_CTRL_WORD_2, 1, &nvm_word);
-			e1000_update_nvm_checksum(hw);
 		}
 	}
 
