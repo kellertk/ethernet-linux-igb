@@ -1605,6 +1605,10 @@ void igb_ptp_reset(struct igb_adapter *adapter)
 		struct timespec64 ts64 = ktime_to_timespec64(ktime_get_real());
 
 		igb_ptp_settime_i210(&adapter->ptp_caps, &ts64);
+		/* board 2409: the DPLL worker re-writes it once the DPLL has
+		 * recovered from the reset (phc_resync_after). */
+		if (adapter->i2c_lmk05318b)
+			adapter->phc_resync_after = jiffies + HZ;
 	} else {
 		timecounter_init(&adapter->tc, &adapter->cc,
 				 ktime_to_ns(ktime_get_real()));

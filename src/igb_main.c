@@ -7760,6 +7760,18 @@ eec_invalid_value          0
                         lmkregs_old[14] = lmkregs[14];
                 }
 
+                if (adapter->phc_resync_after && time_after_eq(jiffies, adapter->phc_resync_after)) {
+                        if ((lmkregs[14] & 0xc0) == 0) {
+                                struct timespec64 now64 = ktime_to_timespec64(ktime_get_real());
+                                adapter->ptp_caps.settime64(&adapter->ptp_caps, &now64);
+                                adapter->phc_resync_after = 0;
+                                dev_warn(&adapter->pdev->dev, "PHC re-initialised: the reset dropped the DPLL reference\n");
+                        } else if (time_after(jiffies, adapter->phc_resync_after + 20 * HZ)) {
+                                adapter->phc_resync_after = 0;
+                                dev_warn(&adapter->pdev->dev, "PHC left as reset: DPLL not locked 20 s after the reset\n");
+                        }
+                }
+
                 if(!init || lmkregs[251] != lmkregs_old[251] ) {
                         if(!init || (lmkregs[251] & 0x03) != (lmkregs_old[251] & 0x03) ) dev_warn(&adapter->pdev->dev, "DPLL switchover mode: %s",
                                 (lmkregs[251] & 0x03) == 0x00 ? "Auto non-revertive" :
