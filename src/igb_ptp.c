@@ -608,7 +608,7 @@ static void igb_ptp_extts1_work_i210(struct work_struct *work)
         struct igb_adapter * adapter = container_of(work, struct igb_adapter, ptp_extts1_work);
         struct e1000_hw *hw = &adapter->hw;
         struct ptp_clock_event event;
-        u32 regval = E1000_READ_REG(hw, E1000_CTRL_EXT);
+        u32 regval = E1000_READ_REG(hw, E1000_CTRL);
 	int skip;
         /* prepare external stamp event */
         event.timestamp = E1000_READ_REG(hw, E1000_AUXSTMPL1);
