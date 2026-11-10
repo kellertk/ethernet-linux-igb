@@ -387,9 +387,9 @@ static int lmkfw = 0;
 module_param(lmkfw, int, S_IRUSR | S_IWUSR);
 MODULE_PARM_DESC(lmkfw, "DPLL firmware load (default 0:read from OTP)");
 
-static int lmkocxotemp = 55;
+static int lmkocxotemp = 50;
 module_param(lmkocxotemp, int, S_IRUSR | S_IWUSR);
-MODULE_PARM_DESC(lmkocxotemp, "OCXO temperature thresshold (default 55 C)");
+MODULE_PARM_DESC(lmkocxotemp, "OCXO temperature thresshold (default 50 C)");
 
 static int dco_step = 0x00;
 module_param(dco_step, int, S_IRUSR | S_IWUSR);
@@ -433,6 +433,11 @@ static void igb_vfta_set(struct igb_adapter *adapter, u32 vid, bool add)
 static int debug = NETIF_MSG_DRV | NETIF_MSG_PROBE;
 module_param(debug, int, S_IRUSR | S_IWUSR);
 MODULE_PARM_DESC(debug, "Debug level (0=none, ..., 16=all)");
+
+int igb_debug_level(void)
+{
+	return debug;
+}
 
 /**
  * igb_init_module - Driver Registration Routine
@@ -1711,7 +1716,7 @@ void igb_power_up_link(struct igb_adapter *adapter)
  *  igb_power_down_link - Power down the phy/serdes link
  *  @adapter: address of board private structure
  */
-static void igb_power_down_link(struct igb_adapter *adapter)
+void igb_power_down_link(struct igb_adapter *adapter)
 {
 	if (adapter->hw.phy.media_type == e1000_media_type_copper)
 		e1000_power_down_phy(&adapter->hw);
@@ -2028,6 +2033,58 @@ static int rtc_read_time(struct device *dev, struct rtc_time *tm, u8 *rtcname)
         }
 
         return err;
+}
+
+/* A DS1307 that lost its supply restarts at 2000-01-01 00:00:00 */
+static bool rtc_time_unset(const struct rtc_time *tm)
+{
+	return tm->tm_year == 100 && tm->tm_mon == 0 && tm->tm_mday == 1;
+}
+
+/* The RTC has no sub-second field: take its time on the next second boundary. */
+static int rtc_read_boundary(struct i2c_client *i2c_rtc, struct rtc_time *tm, u8 *rtcname)
+{
+	struct rtc_time tm2;
+	unsigned long giveup = jiffies + msecs_to_jiffies(1200);
+	int err = rtc_read_time(&i2c_rtc->dev, tm, rtcname), rc;
+
+	if (err)
+		return err;
+	do {
+		usleep_range(2000, 4000);
+		rc = rtc_read_time(&i2c_rtc->dev, &tm2, rtcname);
+	} while (!rc && tm2.tm_sec == tm->tm_sec && time_before(jiffies, giveup));
+	if (!rc && tm2.tm_sec != tm->tm_sec)
+		*tm = tm2;
+	return 0;
+}
+
+/* Set the PHC's time of day from the card RTC or from system time.
+ * Needed after every DPLL reset or holdover. */
+void igb_phc_seed(struct igb_adapter *adapter, const char *why)
+{
+	struct timespec64 ts;
+	struct rtc_time tm;
+	u8 rtcname[12];
+	const char *src = "system time";
+	bool from_rtc = false;
+
+	if (!seed_phc && adapter->i2c_rtc && !rtc_read_boundary(adapter->i2c_rtc, &tm, rtcname)) {
+		if (rtc_time_unset(&tm)) {
+			dev_warn(&adapter->pdev->dev, "RTC reads 2000-01-01, seeding from system time\n");
+		} else {
+			ts.tv_sec = mktime64(tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+			ts.tv_nsec = 0;
+			src = "RTC";
+			from_rtc = true;
+		}
+	}
+	if (!from_rtc)
+		ktime_get_real_ts64(&ts);
+	ts.tv_sec += adapter->rtc_utc_tai;
+	adapter->ptp_caps.settime64(&adapter->ptp_caps, &ts);
+	dev_info(&adapter->pdev->dev, "PHC seeded from %s %s: %lld.%09ld (TAI offset %d s)\n",
+		 src, why, (long long)ts.tv_sec, ts.tv_nsec, adapter->rtc_utc_tai);
 }
 
 
@@ -2764,7 +2821,7 @@ if ( adapter->part_boardfeatures & 0x04 ) {
         struct rtc_time tm;
         int err;
         u8 rtcname[10];
-        err = rtc_read_time(&i2c_rtc->dev, &tm, rtcname);
+        err = rtc_read_boundary(i2c_rtc, &tm, rtcname);
 
         if(!err) {
                 rtc_tv_sec = (u32) mktime64(tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
@@ -2774,7 +2831,11 @@ if ( adapter->part_boardfeatures & 0x04 ) {
                 goto geen_rtc;
         }
 
-        if(rtc_tv_sec < 0 || tm.tm_mon < 0 || tm.tm_mon > 13 || tm.tm_mday > 32 || tm.tm_hour > 25 || tm.tm_min > 61) err = 1;
+        if(rtc_tv_sec < 0 || tm.tm_mon < 0 || tm.tm_mon > 13 || tm.tm_mday > 32 || tm.tm_hour > 25 || tm.tm_min > 61 || rtc_time_unset(&tm)) {
+                dev_warn(&adapter->pdev->dev, "RTC %s reads %04d-%02d-%02d %02d:%02d:%02d, not used\n", rtcname,
+                        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+                rtc_tv_sec = 0;
+        }
         else dev_info(&adapter->pdev->dev, "%s: RTC %s UTC time %02d:%02d:%02d, "
                 "%02d-%02d-%02d, wday=%d, time=%lld.%d",
                 __func__, rtcname,
@@ -3925,6 +3986,8 @@ void igb_reset(struct igb_adapter *adapter)
 
 	if (!netif_running(adapter->netdev))
 		igb_power_down_link(adapter);
+	else if (!igb_ref_link_allowed(adapter))
+		igb_power_down_link(adapter);
 
 	igb_update_mng_vlan(adapter);
 
@@ -4925,6 +4988,7 @@ static int igb_probe(struct pci_dev *pdev,
 		INIT_WORK(&adapter->dma_err_task, igb_dma_err_task);
         INIT_WORK(&adapter->dpll_task, igb_dpll_task);
         INIT_WORK(&adapter->vcodac_task, vcodac_task);
+	igb_align_init(adapter);
 
 	/* Initialize link properties that are user-changeable */
 	adapter->fc_autoneg = true;
@@ -5168,15 +5232,27 @@ offset 0x266-0x269 part_boardfeatures(16b) format2 mask
 
         }
 
-        if( adapter->i2c_rtc && (part_boardfeatures & 0x04) && rtc_tv_sec) {
+        /* Seed the PHC */
+        if( adapter->i2c_rtc && (part_boardfeatures & 0x04)) {
+                const char *src = "RTC";
+
                 if(adapter->i2c_eeprom) adapter->rtc_utc_tai = i2c_smbus_read_byte_data(adapter->i2c_eeprom, 5); //EE_TAI
-                if(adapter->rtc_utc_tai > 0 && adapter->rtc_utc_tai < 50) rtc_tv_sec += adapter->rtc_utc_tai;
-                else adapter->rtc_utc_tai = 0;
+                if(adapter->rtc_utc_tai <= 0 || adapter->rtc_utc_tai >= 50) adapter->rtc_utc_tai = 0;
+                if(seed_phc || !rtc_tv_sec) {
+                        struct timespec64 now;
+
+                        ktime_get_real_ts64(&now);
+                        rtc_tv_sec = now.tv_sec;
+                        rtc_tv_nsec = now.tv_nsec;
+                        src = seed_phc ? "system time (seed_phc)" : "system time (no RTC time)";
+                }
+                rtc_tv_sec += adapter->rtc_utc_tai;
 
                 E1000_WRITE_REG(hw, E1000_SYSTIMR, 0); //fraqtional ns
                 E1000_WRITE_REG(hw, E1000_SYSTIML, (u32)rtc_tv_nsec);
                 E1000_WRITE_REG(hw, E1000_SYSTIMH, (u32)rtc_tv_sec);
-                dev_info(pci_dev_to_dev(pdev), "RTC: PHC initialized time=%lld.%lld +%i%s", rtc_tv_sec, rtc_tv_nsec, adapter->rtc_utc_tai, adapter->rtc_utc_tai ? " (UTC/TAI corrected)" : "(UTC)" );
+                adapter->phc_seeded = 1;
+                dev_info(pci_dev_to_dev(pdev), "PHC initialized from %s: time=%lld.%lld +%i%s", src, rtc_tv_sec, rtc_tv_nsec, adapter->rtc_utc_tai, adapter->rtc_utc_tai ? " (UTC/TAI corrected)" : "(UTC)" );
         }
 
                                                                                 
@@ -5289,9 +5365,7 @@ offset 0x266-0x269 part_boardfeatures(16b) format2 mask
 //      dev_info(&pdev->dev, "R%d\t0x%06X  strlen=%d reg:%d=%d addrl=0x%02X addrh=0x%02X value=0x%02X\n", regnamenum, reghreglregv, strlen(parse_buffer), regnamenum, reghreglregv>>8, reghreglregv >> 16, reghreglregv>>8 & 0x00ff, reghreglregv & 0x0000ff);
 
         if(adapter->i2c_pca9557_19) i2c_smbus_write_byte_data(adapter->i2c_pca9557_19, 1, (u8) ~0x80);
-        res = i2c_smbus_write_word_data(adapter->i2c_lmk05318b, 0x00, (0x0C) | (0x9B << 8));
-        usleep_range(10000, 20000);
-        res = i2c_smbus_write_word_data(adapter->i2c_lmk05318b, 0x00, (0x0C) | (0x1B << 8));
+        igb_lmk_reset(adapter);
         if(adapter->i2c_pca9557_19) i2c_smbus_write_byte_data(adapter->i2c_pca9557_19, 1, ~0x00);
 
                                                                                 
@@ -5546,6 +5620,7 @@ static void igb_remove(struct pci_dev *pdev)
         adapter->i2c_dac1 = 0;
         cancel_work_sync(&adapter->dpll_task);
         cancel_work_sync(&adapter->vcodac_task);
+	igb_align_stop(adapter);
         if(! (i2c_leds & 0x01)) igb_led_destroy(adapter);
         if(! (i2c_leds & 0x10)) igb_led_destroy2(adapter);
 	igb_remove_i2c(adapter);
@@ -5750,7 +5825,7 @@ static int __igb_open(struct net_device *netdev, bool resuming)
 	if (err)
 		goto err_setup_rx;
 
-	igb_power_up_link(adapter);
+	igb_link_gate_up(adapter);
 
 	/* before we allocate an interrupt, we must be ready to handle it.
 	 * Setting DEBUG_SHIRQ in the kernel makes it fire an interrupt
@@ -7574,9 +7649,7 @@ static void igb_dpll_task(struct work_struct *work)
                                         init = 0;
                                         if(lmkreg == 1) {
                                                 dev_info(&adapter->pdev->dev, "DPLL softreset\n");
-                                                res = i2c_smbus_write_word_data(adapter->i2c_lmk05318b, 0x00, (0x0C) | (0x9B << 8));
-                                                usleep_range(10000, 20000);
-                                                res = i2c_smbus_write_word_data(adapter->i2c_lmk05318b, 0x00, (0x0C) | (0x1B << 8));
+                                                igb_lmk_reset(adapter);
                                         }
                                         if (adapter->dac1val_hist > 0) dacval--; else if (adapter->dac1val_hist < 0) dacval++;
                                         dev_info(&adapter->pdev->dev, "VC-OCXO %s: %s DAC:%i %i %i, hist:%i\n", !(lmkregs[14] & 0x40) ? "" : "servo disabled (LOFL)", res == 0 ? "===" : res > 0 ? "hi" : "lo", dacval_old, dacval,
@@ -7661,15 +7734,21 @@ static void igb_dpll_task(struct work_struct *work)
                         temp = tmp102_read(adapter->i2c_tmpocxo);
                         ocxoready = tmp102_read_alert(adapter->i2c_tmpocxo) ? 1 : 0;
                         adapter->ocxo_ready = ocxoready;
+                        /* no DPLL lock on a cold OCXO */
+                        if (!init && !ocxoready)
+                                igb_dpll_hold(adapter, true);
                         if(!init || ocxoready != ocxoready_old) {
                                 dev_warn(&adapter->pdev->dev, "OCXO %s (temperature = %li C)\n", ocxoready ? "ready" : "heating up", temp / 2000);
                                 if(init && ocxoready) {
+                                        igb_dpll_hold(adapter, false);
                                         dev_warn(&adapter->pdev->dev, "APLLx VCO Calibration Active"); /*start lmk calibration*/
-                                        res = i2c_smbus_write_word_data(adapter->i2c_lmk05318b, 0x00, (0x0C) | (0x9B << 8));
-                                        usleep_range(10000, 20000);
-                                        res = i2c_smbus_write_word_data(adapter->i2c_lmk05318b, 0x00, (0x0C) | (0x1B << 8));
+                                        igb_lmk_reset(adapter);
                                 }
                                 ocxoready_old = ocxoready;
+                        } else if (ocxoready && adapter->ref.dpll_held) {
+                                /* re-initialised while held */
+                                igb_dpll_hold(adapter, false);
+                                igb_lmk_reset(adapter);
                         }
                 }
 
@@ -7757,7 +7836,7 @@ eec_invalid_value          0
 
 
                         if(!init || (lmkregs[14] & 0x40) != (lmkregs_old[14] & 0x40) ) dev_warn(&adapter->pdev->dev, "DPLL %s", dpll_fl ? "frequency locked" : "loss of frequency lock");
-                        if(!init || (lmkregs[14] & 0x80) != (lmkregs_old[14] & 0x80) ) dev_warn(&adapter->pdev->dev, "DPLL %s", dpll_pl ? "phase locked" : "loss of phase lock");
+                        if(!init || (lmkregs[14] & 0x80) != (lmkregs_old[14] & 0x80) ) dev_warn(&adapter->pdev->dev, "DPLL %s", dpll_pl ? "loop phase locked, PPS alignment pending" : "loss of phase lock");
                         if(         (lmkregs[14] & 0x20) != (lmkregs_old[14] & 0x20) && dpll_hist) dev_warn(&adapter->pdev->dev, "DPLL Tuning word history update (%s)", datetimestring);
                         if(         (lmkregs[14] & 0x20) != (lmkregs_old[14] & 0x20) && dpll_hist && vco_mode && adapter->i2c_dac1) dev_warn(&adapter->pdev->dev, "VCO Tuning word update (%i/%i) DAC:%i", adapter->dac1val_hist, dacval_hist_interval, adapter->dac1val );
                         if(         (lmkregs[14] & 0x10) != (lmkregs_old[14] & 0x10) ) dev_warn(&adapter->pdev->dev, "DPLL Holdover event %s", dpll_hold ? "start" : "end");
@@ -7769,10 +7848,10 @@ eec_invalid_value          0
 
                 if (adapter->phc_resync_after && time_after_eq(jiffies, adapter->phc_resync_after)) {
                         if ((lmkregs[14] & 0xc0) == 0) {
-                                struct timespec64 now64 = ktime_to_timespec64(ktime_get_real());
-                                adapter->ptp_caps.settime64(&adapter->ptp_caps, &now64);
+                                igb_phc_seed(adapter, "after the adapter reset");
+                                adapter->phc.seeded = true;
+                                adapter->phc.need_seed = false;
                                 adapter->phc_resync_after = 0;
-                                dev_warn(&adapter->pdev->dev, "PHC re-initialised: the reset dropped the DPLL reference\n");
                         } else if (time_after(jiffies, adapter->phc_resync_after + 20 * HZ)) {
                                 adapter->phc_resync_after = 0;
                                 dev_warn(&adapter->pdev->dev, "PHC left as reset: DPLL not locked 20 s after the reset\n");
@@ -7864,6 +7943,8 @@ if( ledctl_old != adapter->ledctl ) {
 
                         netdev_err(adapter->netdev, "DPLL DCO %sabled, step=%i\n", adapter->dco_step ? "en" : "dis", adapter->dco_step);
                 }
+
+                igb_align_run(adapter, lmkregs[14], lmkregs[411], lmkregs[167]);
 
 
 //              i2c_smbus_write_word_data(adapter->i2c_lmk05318b, 0x01, 0x60 | (0x00 << 8)); //DPLL_FDEV_REG_UPDATE increment
@@ -9219,6 +9300,7 @@ static void igb_tsync_interrupt(struct igb_adapter *adapter)
         if (tsicr & TSINTR_AUTT0) {
                 nsec = E1000_READ_REG(hw, E1000_AUXSTMPL0);
                 sec  = E1000_READ_REG(hw, E1000_AUXSTMPH0);
+                igb_align_capture(adapter, 0, sec * 1000000000ULL + nsec);
                 event.type = PTP_CLOCK_EXTTS;
                 event.index = 0;
                 event.timestamp = sec * 1000000000ULL + nsec;
@@ -9229,6 +9311,7 @@ static void igb_tsync_interrupt(struct igb_adapter *adapter)
         if (tsicr & TSINTR_AUTT1) {
                 nsec = E1000_READ_REG(hw, E1000_AUXSTMPL1);
                 sec  = E1000_READ_REG(hw, E1000_AUXSTMPH1);
+                igb_align_capture(adapter, 1, sec * 1000000000ULL + nsec);
                 event.type = PTP_CLOCK_EXTTS;
                 event.index = 1;
                 event.timestamp = sec * 1000000000ULL + nsec;

@@ -19,6 +19,8 @@ define igb-y
 	igb_hwmon.o
 	igb_hwmon-2409.o
 	tmp102.o
+	igb_align.o
+	igb_dpll.o
 	e1000_mbx.o
 	e1000_mac.o
 	e1000_manage.o

@@ -527,6 +527,104 @@ enum igb_filter_match_flags {
 #define IGB_MAX_RXNFC_FILTERS 16
 
 #define IGB_N_EXTTS     2
+
+#define ALIGN_SAMPLES	4
+enum { PHC_WAIT, PHC_ACQUIRE, PHC_HELD };
+enum { PPS_WAIT, PPS_SETTLE, PPS_MEASURE, PPS_SLEW, PPS_ALIGNED, PPS_MOVE, PPS_TAIL };
+struct igb_align_cap {
+	u64 ns;
+	u32 seq;
+	unsigned long at;
+};
+/* GNSS rising edges on the PHC vs host time (igb_align.c): should be whole
+ * seconds apart for the I210 timer. */
+struct igb_clk_check {
+	u64 ns, raw;
+	u32 epoch;
+	bool have, fault, bad;
+	s64 dev, n;
+	unsigned long bad_until;
+};
+struct igb_phc_align {
+	int state;
+	u32 seen;
+	s64 err;
+	s64 lat;
+	s64 win[ALIGN_SAMPLES];
+	int n;
+	int bad;
+	u32 steps;
+	bool stepped;
+	bool seeded, need_seed;
+	u8 last_r14;
+};
+#define PPS_TAIL_SAMPLES	32
+/* A PPS move (igb_align.c): PH_OFFSET rewritten after every GNSS edge along
+ * a model of the widened DPLL loop. */
+struct igb_pps_move {
+	struct delayed_work work;
+	struct mutex lock;
+	bool armed;		   /* tmreg_lock: GNSS edges queue the work */
+	u32 edges;		   /* tmreg_lock: GNSS edges since the start */
+	bool active, done, failed;
+	u32 k, n;		   /* TDC events taken, events in the move */
+	u32 skip;		   /* events before the profile starts */
+	s64 t[6], v[6];    /* velocity knots: us, ps/s */
+	s64 y, i;		   /* model output (ps) and integrator (ps/s) */
+	s64 target, dist;  /* ps */
+	int sign, kp, tau_ms;
+	u64 base;		   /* PH_OFFSET before the move */
+	s64 cpn;
+	u32 scale_ppm;
+	unsigned long last;
+};
+struct igb_pps_align {
+	int state;
+	u32 seen_pps, seen_gnss;
+	u64 ns_pps, ns_gnss;
+	bool have_pps, have_gnss;
+	s64 err;
+	s64 win[ALIGN_SAMPLES];
+	int n;
+	int bad;
+	u64 reg;
+	u32 writes;
+	unsigned long lock_since, wait_until, last_reset;
+	bool far_logged;
+	bool wide, wide_unlocked;	/* DPLL loop widened for a pull */
+	bool pull_pending;		    /* a pull's movement not yet measured */
+	s64 pull_err, pull_step;
+	u32 scale_ppm;			    /* PH_OFFSET counts per datasheet count */
+	u8 narrow_gain, narrow_quant;
+	unsigned long wide_since, flock_since;
+	bool ocxo_logged;
+	bool early;			        /* the landing may be measured at frequency lock */
+	struct igb_pps_move move;
+	s64 tail_t[PPS_TAIL_SAMPLES], tail_e[PPS_TAIL_SAMPLES];
+	u32 tail_n;
+	s64 tail_last;		        /* GNSS second of the last PPS sample */
+	unsigned long tail_since;
+};
+/* (igb_align.c): ready = DPLL locked, PPS aligned. */
+enum { REF_ACQUIRE, REF_READY, REF_HOLDOVER, REF_RELOCK };
+struct dpll_device;
+struct dpll_pin;
+#ifdef NEED_DPLL_TRACKER
+typedef struct {} dpll_tracker;	/* older kernels track no references; kcompat drops the argument */
+#endif
+struct igb_ref {
+	int state;
+	bool latched, valid;
+	bool dpll_held;
+	int link_pending;
+	unsigned long rearm_at;
+	u8 r14, r411, r167;
+	struct dpll_device *dpll;
+	struct dpll_pin *pin[2];
+	dpll_tracker dpll_tracker, pin_tracker[2];
+	u64 clock_id;
+	int dpll_status, pin_state[2];
+};
 #define IGB_N_PEROUT    2
 #define IGB_N_SDP       4
 
@@ -796,6 +894,14 @@ struct igb_adapter {
         u8 lmk_status[6];
         int ocxo_ready;
         unsigned long phc_resync_after;
+        /* GNSS alignment loops (igb_align.c) */
+        int phc_seeded;
+        struct igb_align_cap align_cap[IGB_N_EXTTS];
+        struct igb_clk_check clk;
+        u32 phc_epoch;		/* bumped on every SYSTIM write */
+        struct igb_phc_align phc;
+        struct igb_pps_align pps;
+        struct igb_ref ref;
 
         int map_led0; // lmkregh 1b, lmkregl 0x000-0x19b = R0-R411
         int map_led0_mask; // 5 unused + sys/fw + 1 invert + 1 and/or + 8 mask bits
@@ -983,8 +1089,33 @@ bool igb_has_link(struct igb_adapter *adapter);
 void igb_set_ethtool_ops(struct net_device *netdev);
 void igb_check_options(struct igb_adapter *adapter);
 void igb_power_up_link(struct igb_adapter *adapter);
+void igb_power_down_link(struct igb_adapter *adapter);
 #ifdef HAVE_PTP_1588_CLOCK
 void igb_ptp_init(struct igb_adapter *adapter);
+int igb_ptp_adjtime_internal(struct igb_adapter *adapter, s64 delta);
+void igb_ptp_align_extts(struct igb_adapter *adapter);
+
+/* igb_align.c */
+extern int phc_align, pps_align, pps_extts, gnss_extts, seed_phc, enable_user_phc_adjust;
+int igb_debug_level(void);
+void igb_lmk_reset(struct igb_adapter *adapter);
+void igb_align_init(struct igb_adapter *adapter);
+void igb_align_stop(struct igb_adapter *adapter);
+void igb_phc_seed(struct igb_adapter *adapter, const char *why);
+void igb_align_capture(struct igb_adapter *adapter, int chan, u64 ns);
+void igb_align_run(struct igb_adapter *adapter, u8 r14, u8 r411, u8 r167);
+void igb_ref_event(struct igb_adapter *adapter, const char *why);
+void igb_dpll_hold(struct igb_adapter *adapter, bool hold);
+bool igb_ref_link_allowed(struct igb_adapter *adapter);
+bool igb_ref_time_valid(struct igb_adapter *adapter);
+void igb_link_gate_up(struct igb_adapter *adapter);
+const char *igb_ref_state(struct igb_adapter *adapter);
+/* igb_dpll.c */
+void igb_dpll_register(struct igb_adapter *adapter);
+void igb_dpll_unregister(struct igb_adapter *adapter);
+void igb_dpll_notify(struct igb_adapter *adapter);
+const char *igb_phc_align_state(struct igb_adapter *adapter);
+const char *igb_pps_align_state(struct igb_adapter *adapter);
 void igb_ptp_stop(struct igb_adapter *adapter);
 void igb_ptp_reset(struct igb_adapter *adapter);
 void igb_ptp_tx_work(struct work_struct *work);

@@ -256,9 +256,63 @@ static ssize_t ocxo_ready_show(struct device *dev, struct device_attribute *attr
 }
 static DEVICE_ATTR_RO(ocxo_ready);
 
+static ssize_t phc_align_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct igb_adapter *adapter = netdev_priv(pci_get_drvdata(to_pci_dev(dev)));
+
+	if (!adapter->i2c_lmk05318b)
+		return -ENODEV;
+	return sprintf(buf, "%s err=%lld lat=%lld steps=%u\n", igb_phc_align_state(adapter),
+		       adapter->phc.err, adapter->phc.lat, adapter->phc.steps);
+}
+static DEVICE_ATTR_RO(phc_align);
+
+static ssize_t pps_align_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct igb_adapter *adapter = netdev_priv(pci_get_drvdata(to_pci_dev(dev)));
+
+	if (!adapter->i2c_lmk05318b)
+		return -ENODEV;
+	return sprintf(buf, "%s err=%lld reg=0x%llx writes=%u wide=%d scale=%u\n", igb_pps_align_state(adapter),
+		       adapter->pps.err, adapter->pps.reg, adapter->pps.writes, adapter->pps.wide,
+		       adapter->pps.scale_ppm);
+}
+static DEVICE_ATTR_RO(pps_align);
+
+static ssize_t ref_state_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct igb_adapter *adapter = netdev_priv(pci_get_drvdata(to_pci_dev(dev)));
+
+	if (!adapter->i2c_lmk05318b)
+		return -ENODEV;
+	return sprintf(buf, "%s link=%d time=%d held=%d\n", igb_ref_state(adapter),
+		       adapter->ref.latched, adapter->ref.valid, adapter->ref.dpll_held);
+}
+static DEVICE_ATTR_RO(ref_state);
+
+/* I210 time sync registers, for the day the captures stop again. */
+static ssize_t ts_regs_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct igb_adapter *adapter = netdev_priv(pci_get_drvdata(to_pci_dev(dev)));
+	struct e1000_hw *hw = &adapter->hw;
+
+	return sprintf(buf, "CTRL=%08x CTRL_EXT=%08x TSSDP=%08x TSAUXC=%08x TSIM=%08x TSICR=%08x TIMINCA=%08x AUX0=%08x.%08x AUX1=%08x.%08x\n",
+		       E1000_READ_REG(hw, E1000_CTRL), E1000_READ_REG(hw, E1000_CTRL_EXT),
+		       E1000_READ_REG(hw, E1000_TSSDP), E1000_READ_REG(hw, E1000_TSAUXC),
+		       E1000_READ_REG(hw, E1000_TSIM), E1000_READ_REG(hw, E1000_TSICR),
+		       E1000_READ_REG(hw, E1000_TIMINCA),
+		       E1000_READ_REG(hw, E1000_AUXSTMPH0), E1000_READ_REG(hw, E1000_AUXSTMPL0),
+		       E1000_READ_REG(hw, E1000_AUXSTMPH1), E1000_READ_REG(hw, E1000_AUXSTMPL1));
+}
+static DEVICE_ATTR_RO(ts_regs);
+
 /* called from igb_main.c */
 void igb_sysfs_exit2(struct igb_adapter *adapter)
 {
+	device_remove_file(&adapter->pdev->dev, &dev_attr_ts_regs);
+	device_remove_file(&adapter->pdev->dev, &dev_attr_ref_state);
+	device_remove_file(&adapter->pdev->dev, &dev_attr_pps_align);
+	device_remove_file(&adapter->pdev->dev, &dev_attr_phc_align);
 	device_remove_file(&adapter->pdev->dev, &dev_attr_ocxo_ready);
 	device_remove_file(&adapter->pdev->dev, &dev_attr_lmk_status);
 	igb_sysfs_del_adapter(adapter);
@@ -325,6 +379,18 @@ int igb_sysfs_init2(struct igb_adapter *adapter)
 	if (rc)
 		goto err;
 	rc = device_create_file(&adapter->pdev->dev, &dev_attr_ocxo_ready);
+	if (rc)
+		goto err;
+	rc = device_create_file(&adapter->pdev->dev, &dev_attr_phc_align);
+	if (rc)
+		goto err;
+	rc = device_create_file(&adapter->pdev->dev, &dev_attr_pps_align);
+	if (rc)
+		goto err;
+	rc = device_create_file(&adapter->pdev->dev, &dev_attr_ref_state);
+	if (rc)
+		goto err;
+	rc = device_create_file(&adapter->pdev->dev, &dev_attr_ts_regs);
 	if (rc)
 		goto err;
 

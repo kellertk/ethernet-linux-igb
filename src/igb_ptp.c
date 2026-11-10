@@ -155,6 +155,7 @@ static void igb_ptp_write_i210(struct igb_adapter *adapter,
 	 */
 	E1000_WRITE_REG(hw, E1000_SYSTIML, ts->tv_nsec);
 	E1000_WRITE_REG(hw, E1000_SYSTIMH, ts->tv_sec);
+	adapter->phc_epoch++;	/* the clock check restarts its baseline */
 }
 
 /**
@@ -174,6 +175,11 @@ static void igb_ptp_write_i210(struct igb_adapter *adapter,
  *  In addition, here have extended the system time with an overflow
  *  counter in software.
  **/
+static bool igb_ptp_time_refused(struct igb_adapter *adapter)
+{
+	return adapter->i2c_lmk05318b && phc_align && !igb_ref_time_valid(adapter);
+}
+
 static void igb_ptp_systim_to_hwtstamp(struct igb_adapter *adapter,
 				       struct skb_shared_hwtstamps *hwtstamps,
 				       u64 systim)
@@ -198,6 +204,8 @@ static void igb_ptp_systim_to_hwtstamp(struct igb_adapter *adapter,
 	case e1000_i210:
 	case e1000_i211:
 		memset(hwtstamps, 0, sizeof(*hwtstamps));
+		if (igb_ptp_time_refused(adapter))
+			break;
 		/* Upper 32 bits contain s, lower 32 bits contain ns. */
 		hwtstamps->hwtstamp = ktime_set(systim >> 32,
 						systim & 0xFFFFFFFF);
@@ -261,6 +269,15 @@ static int igb_ptp_adjfreq_82576(struct ptp_clock_info *ptp, s32 ppb)
 }
 #endif /* HAVE_PTP_CLOCK_INFO_ADJFINE */
 
+
+static bool igb_ptp_user_locked(struct igb_adapter *adapter)
+{
+	if (!adapter->i2c_lmk05318b || !phc_align || enable_user_phc_adjust)
+		return false;
+	dev_warn_ratelimited(&adapter->pdev->dev, "PHC adjustment from userspace refused (enable_user_phc_adjust=0)\n");
+	return true;
+}
+
 /**
  * igb_ptp_adjfine_82580
  * @ptp: the ptp clock structure
@@ -278,6 +295,9 @@ static int igb_ptp_adjfine_82580(struct ptp_clock_info *ptp, long scaled_ppm)
 	bool neg_adj;
 	u64 rate;
 	u32 inca;
+
+	if (igb_ptp_user_locked(adapter))
+		return -EPERM;
         int dco_step_l = 0;
 
 	neg_adj = diff_by_scaled_ppm(IGB_82580_BASE_PERIOD, scaled_ppm, &rate);
@@ -427,10 +447,8 @@ static int igb_ptp_adjtime_82576(struct ptp_clock_info *ptp, s64 delta)
 	return 0;
 }
 
-static int igb_ptp_adjtime_i210(struct ptp_clock_info *ptp, s64 delta)
+int igb_ptp_adjtime_internal(struct igb_adapter *igb, s64 delta)
 {
-	struct igb_adapter *igb = container_of(ptp, struct igb_adapter,
-					       ptp_caps);
 	unsigned long flags;
 	struct timespec64 now, then = ns_to_timespec64(delta);
 
@@ -443,6 +461,16 @@ static int igb_ptp_adjtime_i210(struct ptp_clock_info *ptp, s64 delta)
 	spin_unlock_irqrestore(&igb->tmreg_lock, flags);
 
 	return 0;
+}
+
+static int igb_ptp_adjtime_i210(struct ptp_clock_info *ptp, s64 delta)
+{
+	struct igb_adapter *igb = container_of(ptp, struct igb_adapter,
+					       ptp_caps);
+
+	if (igb_ptp_user_locked(igb))
+		return -EPERM;
+	return igb_ptp_adjtime_internal(igb, delta);
 }
 
 static int igb_ptp_gettime_82576(struct ptp_clock_info *ptp,
@@ -477,6 +505,8 @@ static int igb_ptp_gettime_i210(struct ptp_clock_info *ptp,
 
 	spin_unlock_irqrestore(&igb->tmreg_lock, flags);
 
+	if (igb_ptp_time_refused(igb))
+		return -EAGAIN;
 	return 0;
 }
 
@@ -585,6 +615,7 @@ static void igb_ptp_extts0_work_i210(struct work_struct *work)
         /* prepare external stamp event */
         event.timestamp = E1000_READ_REG(hw, E1000_AUXSTMPL0);
         event.timestamp += E1000_READ_REG(hw, E1000_AUXSTMPH0) * NSEC_PER_SEC;
+	igb_align_capture(adapter, 0, event.timestamp);
 
 	skip = 0;
 
@@ -613,6 +644,7 @@ static void igb_ptp_extts1_work_i210(struct work_struct *work)
         /* prepare external stamp event */
         event.timestamp = E1000_READ_REG(hw, E1000_AUXSTMPL1);
         event.timestamp += E1000_READ_REG(hw, E1000_AUXSTMPH1) * NSEC_PER_SEC;
+	igb_align_capture(adapter, 1, event.timestamp);
 
 	skip = 0;
 
@@ -652,12 +684,22 @@ static void igb_ptp_fire_pps_event_i210(struct work_struct *work)
         ptp_clock_event(adapter->ptp_clock, &event);
 }
 
+static bool igb_ptp_extts_pinned(struct igb_adapter *adapter, int index)
+{
+	return adapter->i2c_lmk05318b && (phc_align || pps_align) &&
+	       (index == pps_extts || index == gnss_extts);
+}
+
 static void igb_ptp_switch_extts(struct ptp_clock_info *ptp,
                 struct ptp_clock_request *rq, int on)
 {
         struct igb_adapter * adapter = container_of(ptp, struct igb_adapter, ptp_caps);
         struct e1000_hw * hw = &adapter->hw;
         u32 regval;
+
+	/* the alignment loops keep their channels capturing */
+	if (!(rq->extts.flags & PTP_ENABLE_FEATURE) && igb_ptp_extts_pinned(adapter, rq->extts.index))
+		return;
         switch(rq->extts.index) {
         case 0:
 		adapter->ts0_flags = rq->extts.flags;
@@ -745,6 +787,20 @@ static void igb_ptp_switch_extts(struct ptp_clock_info *ptp,
                 break;
         default: break;
         }
+}
+
+void igb_ptp_align_extts(struct igb_adapter *adapter)
+{
+	struct ptp_clock_request rq = { .type = PTP_CLK_REQ_EXTTS };
+
+	if (!igb_ptp_extts_pinned(adapter, pps_extts))
+		return;
+	rq.extts.flags = PTP_ENABLE_FEATURE | PTP_RISING_EDGE;
+	rq.extts.index = pps_extts;
+	igb_ptp_switch_extts(&adapter->ptp_caps, &rq, 1);
+	rq.extts.index = gnss_extts;
+	igb_ptp_switch_extts(&adapter->ptp_caps, &rq, 1);
+	dev_info(&adapter->pdev->dev, "GNSS alignment captures on extts %d (PPS) and %d (GNSS)\n", pps_extts, gnss_extts);
 }
 
 static int igb_ptp_enable_i210(struct ptp_clock_info *ptp,
@@ -1487,7 +1543,10 @@ void igb_ptp_init(struct igb_adapter *adapter)
 	if ((hw->mac.type == e1000_i210) || (hw->mac.type == e1000_i211)) {
 		struct timespec64 ts = ktime_to_timespec64(ktime_get_real());
 
-		igb_ptp_settime_i210(&adapter->ptp_caps, &ts);
+		if (!adapter->phc_seeded)
+			igb_ptp_settime_i210(&adapter->ptp_caps, &ts);
+		else
+			dev_info(&adapter->pdev->dev, "PHC keeps the probe seed\n");
 	} else {
 		timecounter_init(&adapter->tc, &adapter->cc,
 				 ktime_to_ns(ktime_get_real()));
@@ -1517,6 +1576,8 @@ void igb_ptp_init(struct igb_adapter *adapter)
 		dev_info(&adapter->pdev->dev, "added PHC on %s\n",
 			 adapter->netdev->name);
 		adapter->flags |= IGB_FLAG_PTP;
+		igb_ptp_align_extts(adapter);
+		igb_dpll_register(adapter);
 	}
         printk("%s (%d): PPS compensation offset: %d ns\n",__FUNCTION__,__LINE__,adapter->pps_delay);
 }
@@ -1551,6 +1612,7 @@ void igb_ptp_stop(struct igb_adapter *adapter)
 		clear_bit_unlock(__IGB_PTP_TX_IN_PROGRESS, adapter->state);
 	}
 
+	igb_dpll_unregister(adapter);
 	if (adapter->ptp_clock) {
 		ptp_clock_unregister(adapter->ptp_clock);
 		dev_info(&adapter->pdev->dev, "removed PHC on %s\n",
@@ -1607,8 +1669,12 @@ void igb_ptp_reset(struct igb_adapter *adapter)
 		igb_ptp_settime_i210(&adapter->ptp_caps, &ts64);
 		/* board 2409: the DPLL worker re-writes it once the DPLL has
 		 * recovered from the reset (phc_resync_after). */
-		if (adapter->i2c_lmk05318b)
+		if (adapter->i2c_lmk05318b) {
 			adapter->phc_resync_after = jiffies + HZ;
+			adapter->phc.state = PHC_WAIT;
+			adapter->phc.need_seed = true;
+		}
+		igb_ptp_align_extts(adapter);
 	} else {
 		timecounter_init(&adapter->tc, &adapter->cc,
 				 ktime_to_ns(ktime_get_real()));
