@@ -3540,19 +3540,25 @@ static int read_eeprom_lmk(struct igb_adapter *adapter, u32 *data, int len)
         res = i2c_smbus_read_byte_data(adapter->i2c_eeprom, EE_DAC1_BASE);
         if (res != 0x4f) return -1;
 
-        len = 4; // vH,vL,mode,interval
+        // The block is written as {vL,vH} by the EEPROM tool (terminator at +3)
+        // or as {vL,vH,interval,mode} (terminator at +5); the short form keeps
+        // the module's mode and interval.
+        len = 4; // vL,vH,interval,mode
+        if( i2c_smbus_read_byte_data(adapter->i2c_eeprom, EE_DAC1_BASE + 3) == 0x6f /* o */) len = 2; // vL,vH
         res = i2c_smbus_read_byte_data(adapter->i2c_eeprom, EE_DAC1_BASE + ((u8)len +1) );
         if( res != 0x6f /* o */) return -7;
         else {
                 int dac1val;
-                dev_info(&adapter->pdev->dev, "%s (%d): Found DAC1 block @ 0x%04x\n", __FUNCTION__,__LINE__, EE_DAC1_BASE);
+                dev_info(&adapter->pdev->dev, "%s (%d): Found DAC1 block @ 0x%04x (%d bytes)\n", __FUNCTION__,__LINE__, EE_DAC1_BASE, len);
                 dac1val = i2c_smbus_read_byte_data(adapter->i2c_eeprom, EE_DAC1_BASE + 1 );
                 dac1val += i2c_smbus_read_byte_data(adapter->i2c_eeprom, EE_DAC1_BASE + 2 ) << 8;
-                adapter->dac1val_hist = 4 * i2c_smbus_read_byte_data(adapter->i2c_eeprom, EE_DAC1_BASE + 3 );
-                adapter->vco_mode = i2c_smbus_read_byte_data(adapter->i2c_eeprom, EE_DAC1_BASE + 4 );
+                if( len == 4 ) {
+                        adapter->dac1val_hist = 4 * i2c_smbus_read_byte_data(adapter->i2c_eeprom, EE_DAC1_BASE + 3 );
+                        adapter->vco_mode = i2c_smbus_read_byte_data(adapter->i2c_eeprom, EE_DAC1_BASE + 4 );
 
-                // only support mode 1 and 2 for now
-                if(adapter->vco_mode < 1 || adapter->vco_mode > 2 || adapter->dac1val_hist == 0) {adapter->vco_mode = 0; }
+                        // only support mode 1 and 2 for now
+                        if(adapter->vco_mode < 1 || adapter->vco_mode > 2 || adapter->dac1val_hist == 0) {adapter->vco_mode = 0; }
+                }
                 if(dac1val < 8 || dac1val > 4090) {
                         dev_info(&adapter->pdev->dev, "%s (%d): DAC1 value out of range (%d)\n", __FUNCTION__,__LINE__, dac1val);
                         return -3;
