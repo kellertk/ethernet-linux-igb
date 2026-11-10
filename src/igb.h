@@ -15,6 +15,9 @@
 #endif
 
 #include <linux/pci.h>
+
+#define PCI_STD_NUM_BARS 6
+
 #include <linux/netdevice.h>
 #include <linux/vmalloc.h>
 
@@ -539,7 +542,7 @@ struct igb_nfc_input {
 	__be16 vlan_tci;
 	u8 src_addr[ETH_ALEN];
 	u8 dst_addr[ETH_ALEN];
-};
+} __packed;
 
 struct igb_nfc_filter {
 	struct hlist_node nfc_node;
