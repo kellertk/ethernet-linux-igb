@@ -50,12 +50,14 @@
 
 
 
-//#if LINUX_VERSION_CODE < KERNEL_VERSION(5,15,0)
 static inline void eth_hw_addr_set1(struct net_device *dev, const u8 *addr)
 {
-    memcpy(dev->dev_addr, addr, ETH_ALEN);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0)
+	eth_hw_addr_set(dev, addr);
+#else
+	memcpy(dev->dev_addr, addr, ETH_ALEN);
+#endif
 }
-//#endif
 
 
 static inline struct i2c_client *i2c_new_client_device1(struct i2c_adapter *adap, struct i2c_board_info const *info)
