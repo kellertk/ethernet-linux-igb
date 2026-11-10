@@ -5802,8 +5802,9 @@ static int __igb_open(struct net_device *netdev, bool resuming)
 	/* start the watchdog. */
 	hw->mac.get_link_status = 1;
 	schedule_work(&adapter->watchdog_task);
-	if(adapter->i2c_lmk05318b) schedule_work(&adapter->dpll_task);
-        if(adapter->i2c_dac1) schedule_work(&adapter->vcodac_task);
+
+	if(adapter->i2c_lmk05318b) queue_work(system_unbound_wq, &adapter->dpll_task);
+    if(adapter->i2c_dac1) queue_work(system_unbound_wq, &adapter->vcodac_task);
 
 	return E1000_SUCCESS;
 
@@ -7510,7 +7511,7 @@ static void vcodac_task(struct work_struct *work)
                         dac1val_histi = 0;
                         adapter->dac1val_hist = 0;
                 }
-                msleep(960);
+                schedule_timeout_idle(msecs_to_jiffies(960));
         }
 
         netdev_err(adapter->netdev, "VCO DAC worker stop\n");
@@ -7871,7 +7872,7 @@ if( ledctl_old != adapter->ledctl ) {
                                                                                                         
 skip:
 
-                msleep(960);
+                schedule_timeout_idle(msecs_to_jiffies(960));
          }
 //      i2c_leds |= 0xff;
 nolmk:
