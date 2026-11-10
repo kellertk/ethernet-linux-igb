@@ -793,6 +793,9 @@ struct igb_adapter {
         int dco_inc;
         int dco_dec;
         int dpll_flags; //DPLL_FLAGS_LOPL_DPLL DPLL_FLAGS_LOFL_DPLL DPLL_FLAGS_HLDOVR
+        u8 lmk_status[6];
+        int ocxo_ready;
+        unsigned long phc_resync_after;
 
         int map_led0; // lmkregh 1b, lmkregl 0x000-0x19b = R0-R411
         int map_led0_mask; // 5 unused + sys/fw + 1 invert + 1 and/or + 8 mask bits

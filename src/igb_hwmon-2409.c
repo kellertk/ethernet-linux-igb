@@ -234,9 +234,33 @@ static void igb_sysfs_del_adapter(struct igb_adapter *adapter)
 
 }
 
+static ssize_t lmk_status_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct igb_adapter *adapter = netdev_priv(pci_get_drvdata(to_pci_dev(dev)));
+
+	if (!adapter->i2c_lmk05318b)
+		return -ENODEV;
+	return sprintf(buf, "R13=%02x R14=%02x R128=%02x R167=%02x R251=%02x R411=%02x\n",
+		       adapter->lmk_status[0], adapter->lmk_status[1], adapter->lmk_status[2],
+		       adapter->lmk_status[3], adapter->lmk_status[4], adapter->lmk_status[5]);
+}
+static DEVICE_ATTR_RO(lmk_status);
+
+static ssize_t ocxo_ready_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct igb_adapter *adapter = netdev_priv(pci_get_drvdata(to_pci_dev(dev)));
+
+	if (!adapter->i2c_tmpocxo)
+		return -ENODEV;
+	return sprintf(buf, "%d\n", adapter->ocxo_ready);
+}
+static DEVICE_ATTR_RO(ocxo_ready);
+
 /* called from igb_main.c */
 void igb_sysfs_exit2(struct igb_adapter *adapter)
 {
+	device_remove_file(&adapter->pdev->dev, &dev_attr_ocxo_ready);
+	device_remove_file(&adapter->pdev->dev, &dev_attr_lmk_status);
 	igb_sysfs_del_adapter(adapter);
 }
 
@@ -297,6 +321,12 @@ int igb_sysfs_init2(struct igb_adapter *adapter)
 		if (rc)
 			goto err;
 	}
+	rc = device_create_file(&adapter->pdev->dev, &dev_attr_lmk_status);
+	if (rc)
+		goto err;
+	rc = device_create_file(&adapter->pdev->dev, &dev_attr_ocxo_ready);
+	if (rc)
+		goto err;
 
 	goto exit;
 

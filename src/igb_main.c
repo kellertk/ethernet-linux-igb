@@ -7643,9 +7643,17 @@ static void igb_dpll_task(struct work_struct *work)
                         if (res < 0) goto skip;
                         lmkregs[lmkregi] = (u8)res;
 
+                        adapter->lmk_status[0] = lmkregs[13];
+                        adapter->lmk_status[1] = lmkregs[14];
+                        adapter->lmk_status[2] = lmkregs[128];
+                        adapter->lmk_status[3] = lmkregs[167];
+                        adapter->lmk_status[4] = lmkregs[251];
+                        adapter->lmk_status[5] = lmkregs[411];
+
                 if(adapter->i2c_tmpocxo) {
                         temp = tmp102_read(adapter->i2c_tmpocxo);
                         ocxoready = tmp102_read_alert(adapter->i2c_tmpocxo) ? 1 : 0;
+                        adapter->ocxo_ready = ocxoready;
                         if(!init || ocxoready != ocxoready_old) {
                                 dev_warn(&adapter->pdev->dev, "OCXO %s (temperature = %li C)\n", ocxoready ? "ready" : "heating up", temp / 2000);
                                 if(init && ocxoready) {
@@ -7710,9 +7718,9 @@ static void igb_dpll_task(struct work_struct *work)
                         dpll_hist = (lmkregs[14] & 0x20) ? 0x01 : 0x00;
                         dpll_hold = (lmkregs[14] & 0x10) ? 0x01 : 0x00;
                         dpll_refswitch = (lmkregs[14] & 0x08) ? 0x01 : 0x00;
-			adapter->dpll_flags = dpll_pl ? 0 : DPLL_FLAGS_LOPL_DPLL +
-				dpll_fl ? 0 : DPLL_FLAGS_LOFL_DPLL +
-				dpll_hold ? DPLL_FLAGS_HLDOVR : 0;
+			adapter->dpll_flags = (dpll_pl ? 0 : DPLL_FLAGS_LOPL_DPLL) |
+				(dpll_fl ? 0 : DPLL_FLAGS_LOFL_DPLL) |
+				(dpll_hold ? DPLL_FLAGS_HLDOVR : 0);
 
 /*
 eec_holdover_value         4
