@@ -575,7 +575,7 @@ static int igb_ptp_enable(struct ptp_clock_info *ptp,
  *
  * This work function resets the PPS output registers.
  */
-void igb_ptp_extts0_work_i210(struct work_struct *work)
+static void igb_ptp_extts0_work_i210(struct work_struct *work)
 {
         struct igb_adapter * adapter = container_of(work, struct igb_adapter, ptp_extts0_work);
         struct e1000_hw *hw = &adapter->hw;
@@ -603,7 +603,7 @@ void igb_ptp_extts0_work_i210(struct work_struct *work)
         if(!skip) ptp_clock_event(adapter->ptp_clock, &event);
 }
 
-void igb_ptp_extts1_work_i210(struct work_struct *work)
+static void igb_ptp_extts1_work_i210(struct work_struct *work)
 {
         struct igb_adapter * adapter = container_of(work, struct igb_adapter, ptp_extts1_work);
         struct e1000_hw *hw = &adapter->hw;
@@ -638,7 +638,7 @@ void igb_ptp_extts1_work_i210(struct work_struct *work)
  *
  * This work function resets the PPS output registers.
  */
-void igb_ptp_fire_pps_event_i210(struct work_struct *work)
+static void igb_ptp_fire_pps_event_i210(struct work_struct *work)
 {
         struct igb_adapter * adapter = container_of(work, struct igb_adapter, ptp_fire_pps_event_work);
         struct ptp_clock_event event;

@@ -1,5 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* TMP102 temperature sensors on the Octo board 2409: board (0x49) and OCXO (0x4a). */
 #ifndef _TMP102_
 #define _TMP102_
+
+#include <linux/types.h>
 
 #define TMP102_TEMP_REG                 0x00
 #define TMP102_CONF_REG                 0x01
@@ -44,33 +48,13 @@ static inline u16 tmp102_mC_to_reg(int val)
         return (val * 128) / 1000;
 }
 
-//tmp102_init(adapter->i2c_tmpocxo, 50, 75);
-int tmp102_init (struct i2c_client *client, int lo_limit, int hi_limit ){
-   __u16 regval;
-   //float val;
-	int res;
-   regval = __swab16(i2c_smbus_read_word_data(client, 0x03));
-    res = i2c_smbus_write_word_data(client, 0x02, __swab16(lo_limit*256));               // eeprom caldata in 8 bit=0..255 C
-    res = i2c_smbus_write_word_data(client, 0x03, __swab16(hi_limit*256));               // eeprom caldata in 8 bit=0..255 C
-return res;
-}
+struct i2c_client;
 
-//long temp = tmp102_read(adapter->i2c_tmpocxo);
-const long tmp102_read (struct i2c_client *client){
-    __u16 regval;
-    float val;
-    regval = __swab16(i2c_smbus_read_word_data(client, 0x00));
-    val = ((regval & ~0x01) * 1000) / 128;
-//return val/2000;
-    return tmp102_reg_to_mC(regval);
-}
+/* alert window in whole degrees C; returns the last write's status */
+int tmp102_init(struct i2c_client *client, int lo_limit, int hi_limit);
+/* temperature in milliCelsius */
+long tmp102_read(struct i2c_client *client);
+/* 1 while the temperature is outside the alert window */
+int tmp102_read_alert(struct i2c_client *client);
 
-//int alert = tmp102_read_alert(adapter->i2c_tmpocxo);
-int tmp102_read_alert (struct i2c_client *client ){
-    __u16 regval;
-    int val;
-    regval = __swab16(i2c_smbus_read_word_data(client, 0x01));
-    val = (regval & 0x0020) ;
-return val != 0x0020;
-}
 #endif /* _TMP102_ */

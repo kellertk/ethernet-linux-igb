@@ -940,8 +940,10 @@ enum host_cmd_id_status {
 extern char igb_driver_name[];
 extern char igb_driver_version[];
 
-extern void igb_ptp_fire_pps_event_work(struct work_struct *work);
-extern void igb_ptp_pps_work(struct work_struct *work);
+#ifdef HAVE_I2C_SUPPORT
+s32 igb_read_i2c_byte(struct e1000_hw *hw, u8 byte_offset, u8 dev_addr, u8 *data);
+s32 igb_write_i2c_byte(struct e1000_hw *hw, u8 byte_offset, u8 dev_addr, u8 data);
+#endif /* HAVE_I2C_SUPPORT */
 
 void igb_led_set(struct igb_adapter *adapter, int led, u16 brightness);
 enum led_brightness igb_led_get(struct igb_adapter *adapter, int led);

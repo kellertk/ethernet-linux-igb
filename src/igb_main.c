@@ -2366,9 +2366,11 @@ static struct i2c_board_info eeprom2_info = {
         I2C_BOARD_INFO("eeprom_2", (0x54)),
 };
 
+#ifdef HAVE_MCU32
 static struct i2c_board_info mcu_info = {
         I2C_BOARD_INFO("mcu", (0x30)),
 };
+#endif
 
 
 
@@ -2393,7 +2395,9 @@ static s32 igb_init_i2c(struct igb_adapter *adapter)
         struct i2c_client *i2c_eeprom; // 0x50
         struct i2c_client *i2c_dac1; // 0x60 VCO
         struct i2c_client *i2c_dac2; // 0x61 DAC2
+#ifdef HAVE_MCU32
         struct i2c_client *i2c_mcu; // 0x30 MCU
+#endif
 //        int sec_bin, min_bin, hour_bin, mday_bin,  wday_bin, mon_bin, year_bin;
         int ret;
         int rtctype = 0; // 1:pcf8563, 2:m41t81, 3:ds1307
@@ -3060,7 +3064,7 @@ static void igb_select_led2(struct igb_adapter *adapter, int led,
         }
 }
 
-void igb_led_set2(struct igb_adapter *adapter, int led, u16 brightness)
+static void igb_led_set2(struct igb_adapter *adapter, int led, u16 brightness)
 {
 //        struct e1000_hw *hw = &adapter->hw;
         u32 shift, mask, ledctl2;
@@ -3085,7 +3089,7 @@ void igb_led_set2(struct igb_adapter *adapter, int led, u16 brightness)
         if( ! (i2c_leds & 0x08)) mutex_unlock(&adapter->led_mutex2);
 }
 
-enum led_brightness igb_led_get2(struct igb_adapter *adapter, int led)
+static enum led_brightness igb_led_get2(struct igb_adapter *adapter, int led)
 {
 //        struct e1000_hw *hw = &adapter->hw;
         u32 shift, mask, ledctl2;
@@ -3329,7 +3333,7 @@ static void igb_led_destroy2(struct igb_adapter *adapter)
 // leds end
                                                                                                                                                                         
 
-s32 igb_validate_nvm_checksum_octo(struct pci_dev *pdev, struct e1000_hw *hw)
+static s32 igb_validate_nvm_checksum_octo(struct pci_dev *pdev, struct e1000_hw *hw)
 {
         s32 ret_val = 0;
         u16 checksum = 0;
@@ -7381,31 +7385,6 @@ unsigned int mcp4725_set_value ( struct igb_adapter *adapter )
         }
 }
 
-unsigned int mcp4725_set_value2 ( struct igb_adapter *adapter )
-{
-        u8 outbuf[3];
-//        int ret;
-        u16 val;
-
-        if( ! adapter->i2c_dac2 ) return 1;
-
-        val = adapter->dac2val;
-        if (val >= (1 << 12) ) val = (1 << 12);
-        else if (val < 0) val = 0;
-
-        outbuf[0] = 0b00000000;
-
-        outbuf[0] += (val >> 8) & 0xf;
-        outbuf[1] = val & 0xff;
-
-        if( i2c_smbus_write_byte_data(adapter->i2c_dac2, outbuf[0], outbuf[1]) )
-        {
-                return 1;
-        } else {
-                return 0;
-        }
-}
-
 /**
  * read_lmk - Read atomic 1 byte from 16-bit register of LMK05318B
  * @client: Pointer to struct i2c_client
@@ -7451,7 +7430,7 @@ static int read_lmk(struct i2c_client *client, u16 reg)
     return (ret < 0) ? ret : -EIO;
 }
 
-int lmk05318_hinomlo(struct igb_adapter *adapter)
+static int lmk05318_hinomlo(struct igb_adapter *adapter)
 {
         u8 lmkregs[512];
         int i, res;

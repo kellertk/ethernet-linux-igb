@@ -13,10 +13,9 @@
 #include <linux/netdevice.h>
 #include <linux/hwmon.h>
 #include <linux/pci.h>
-//#include "tmp102.h"
+#include "tmp102.h"
 
 #define BOARD2409_MAX_SENSORS 2
-const long tmp102_read (struct i2c_client *client);
 
 
 /* hwmon callback functions */
