@@ -1092,7 +1092,6 @@ static void ref_update(struct igb_adapter *adapter, u8 r14, u8 r411, u8 r167)
 	}
 	if (ready && !r->latched) {
 		r->latched = true;
-		dev_warn(&adapter->pdev->dev, "Clock reference ready: DPLL locked, PPS aligned, PHC held\n");
 		link_power(adapter, true);
 	} else if (r->link_pending) {
 		link_power(adapter, r->link_pending > 0);

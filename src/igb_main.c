@@ -7684,7 +7684,6 @@ static void igb_dpll_task(struct work_struct *work)
                                         temp = tmp102_read(adapter->i2c_tmpocxo);
                                         ocxoready = tmp102_read_alert(adapter->i2c_tmpocxo) ? 1 : 0;
                                 }
-                                dev_warn(&adapter->pdev->dev, "OCXO %s (temperature = %li C, thresshold = %i C)\n", ocxoready ? "ready" : "heating up", temp / 2000, lmkocxotemp);
                                 lmkocxotemp_l = lmkocxotemp;
                         }
                         lmkregi = adapter->lmkreg;
