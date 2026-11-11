@@ -45,7 +45,9 @@ int pull_quant = 3;
 module_param(pull_quant, int, S_IRUSR | S_IWUSR);
 MODULE_PARM_DESC(pull_quant, "DPLL main QUANT (R296) during phase adjustment (default 3 = 0.1 Hz)");
 
-static const int pull_scale = 500000; /* PH_OFFSET scaling: 500000 is 0.5 the datasheet values */
+int pull_scale = 500000;
+module_param(pull_scale, int, S_IRUSR);
+MODULE_PARM_DESC(pull_scale, "first prediction of how far a PH_OFFSET write moves the PPS, ppm of the datasheet counts (default 500000 = moves twice as far; corrected from each measured step)");
 
 int pps_step_ppm = 550;
 module_param(pps_step_ppm, int, S_IRUSR | S_IWUSR);
@@ -474,7 +476,7 @@ static void pps_slew(struct igb_adapter *adapter, s64 err)
 		return;
 	}
 	if (!pa->scale_ppm)
-		pa->scale_ppm = pull_scale;
+		pa->scale_ppm = clamp(pull_scale, 100000, 4000000);
 	counts = div_s64(div_s64(adj * cpn, 1000) * pa->scale_ppm, 1000);
 	val = (cur + counts) & LMK_PH_OFFSET_MASK;
 	if (lmk_wr_offset(adapter, val) < 0) {
@@ -698,7 +700,7 @@ static void pps_step_start(struct igb_adapter *adapter, s64 err)
 	igb_ref_event(adapter, "PPS step");
 	pps_loop_wide(adapter);
 	if (!pa->scale_ppm)
-		pa->scale_ppm = pull_scale;
+		pa->scale_ppm = clamp(pull_scale, 100000, 4000000);
 	mutex_lock(&m->lock);
 	m->kp = clamp(pps_step_kp, 100, 1500);
 	m->tau_ms = clamp(pps_step_tau_ms, 10000, 2000000);
