@@ -530,7 +530,7 @@ enum igb_filter_match_flags {
 
 #define ALIGN_SAMPLES	4
 enum { PHC_WAIT, PHC_ACQUIRE, PHC_HELD };
-enum { PPS_WAIT, PPS_SETTLE, PPS_MEASURE, PPS_SLEW, PPS_ALIGNED, PPS_MOVE, PPS_TAIL };
+enum { PPS_WAIT, PPS_SETTLE, PPS_MEASURE, PPS_SLEW, PPS_ALIGNED, PPS_STEP, PPS_TAIL };
 struct igb_align_cap {
 	u64 ns;
 	u32 seq;
@@ -559,21 +559,21 @@ struct igb_phc_align {
 	u8 last_r14;
 };
 #define PPS_TAIL_SAMPLES	32
-/* A PPS move (igb_align.c): PH_OFFSET rewritten after every GNSS edge along
+/* A PPS step (igb_align.c): PH_OFFSET rewritten after every GNSS edge along
  * a model of the widened DPLL loop. */
-struct igb_pps_move {
+struct igb_pps_step {
 	struct delayed_work work;
 	struct mutex lock;
 	bool armed;		   /* tmreg_lock: GNSS edges queue the work */
 	u32 edges;		   /* tmreg_lock: GNSS edges since the start */
 	bool active, done, failed;
-	u32 k, n;		   /* TDC events taken, events in the move */
+	u32 k, n;		   /* TDC events taken, events in the step */
 	u32 skip;		   /* events before the profile starts */
 	s64 t[6], v[6];    /* velocity knots: us, ps/s */
 	s64 y, i;		   /* model output (ps) and integrator (ps/s) */
 	s64 target, dist;  /* ps */
 	int sign, kp, tau_ms;
-	u64 base;		   /* PH_OFFSET before the move */
+	u64 base;		   /* PH_OFFSET before the step */
 	s64 cpn;
 	u32 scale_ppm;
 	unsigned long last;
@@ -591,15 +591,15 @@ struct igb_pps_align {
 	u32 writes;
 	unsigned long lock_since, wait_until, last_reset;
 	bool far_logged;
-	bool wide, wide_unlocked;	/* DPLL loop widened for a pull */
+	bool wide, wide_unlocked;	/* DPLL loop widened for a step */
 	bool pull_pending;		    /* a pull's movement not yet measured */
-	s64 pull_err, pull_step;
+	s64 pull_err, pull_ns;
 	u32 scale_ppm;			    /* PH_OFFSET counts per datasheet count */
 	u8 narrow_gain, narrow_quant;
 	unsigned long wide_since, flock_since;
 	bool ocxo_logged;
 	bool early;			        /* the landing may be measured at frequency lock */
-	struct igb_pps_move move;
+	struct igb_pps_step step;
 	s64 tail_t[PPS_TAIL_SAMPLES], tail_e[PPS_TAIL_SAMPLES];
 	u32 tail_n;
 	s64 tail_last;		        /* GNSS second of the last PPS sample */
