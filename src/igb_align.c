@@ -49,7 +49,7 @@ static const int pull_scale = 500000; /* PH_OFFSET scaling: 500000 is 0.5 the da
 
 int pps_move_ppm = 550;
 module_param(pps_move_ppm, int, S_IRUSR | S_IWUSR);
-MODULE_PARM_DESC(pps_move_ppm, "phase adjustment slew limit, ppm (default 550, max 682)");
+MODULE_PARM_DESC(pps_move_ppm, "phase adjustment slew limit, ppm (default 550, max 680)");
 
 int pps_move_kp = 553;
 module_param(pps_move_kp, int, S_IRUSR | S_IWUSR);
@@ -61,11 +61,11 @@ MODULE_PARM_DESC(pps_move_tau_ms, "Kp/Ki of the widened DPLL loop during phase a
 
 int pps_move_lead_in = 10;
 module_param(pps_move_lead_in, int, S_IRUSR | S_IWUSR);
-MODULE_PARM_DESC(pps_move_lead_in, "delay this many GNSS edges after widening the DPLL loop before adjusting phase(default 10)");
+MODULE_PARM_DESC(pps_move_lead_in, "delay this many GNSS edges after widening the DPLL loop before adjusting phase (default 10)");
 
 int pps_narrow_ns = 500;
 module_param(pps_narrow_ns, int, S_IRUSR | S_IWUSR);
-MODULE_PARM_DESC(pps_narrow_ns, "reset DPLL to narrow LBW once phase error is below this value, ns (default 500)");
+MODULE_PARM_DESC(pps_narrow_ns, "set DPLL to narrow LBW once phase error is below this value, ns (default 500)");
 
 int pps_extts = 0;
 module_param(pps_extts, int, S_IRUSR);
@@ -388,7 +388,7 @@ static void phc_run(struct igb_adapter *adapter, bool locked)
 
 	if (!locked) {
 		if (p->state != PHC_WAIT) {
-			dev_warn(&adapter->pdev->dev, "PHC phase: waiting for DPLL lock\n");
+			dev_warn(&adapter->pdev->dev, "PHC phase: Waiting for DPLL lock\n");
 			p->need_seed = true;
 		}
 		p->state = PHC_WAIT;
@@ -418,7 +418,7 @@ static void phc_run(struct igb_adapter *adapter, bool locked)
 		p->stepped = false;
 		if (abs(err) < PHC_LAT_LEARN_NS) {
 			p->lat = clamp_t(s64, p->lat - err, 0, PHC_LAT_MAX_NS);
-			align_dbg(adapter, "PHC phase: step latency now %lld ns\n", p->lat);
+			align_dbg(adapter, "PHC phase: Step latency now %lld ns\n", p->lat);
 		}
 	}
 
@@ -429,7 +429,7 @@ static void phc_run(struct igb_adapter *adapter, bool locked)
 			return;
 		p->n = 0;
 		if (!window_median(p->win, &median)) {
-			dev_warn(&adapter->pdev->dev, "PHC phase: captures spread beyond %d ns, measuring again\n", ALIGN_SPREAD_NS);
+			dev_warn(&adapter->pdev->dev, "PHC phase: Captures spread beyond %d ns, measuring again\n", ALIGN_SPREAD_NS);
 			return;
 		}
 		if (abs(median) < PHC_HELD_NS) {
@@ -442,7 +442,7 @@ static void phc_run(struct igb_adapter *adapter, bool locked)
 		igb_ptp_adjtime_internal(adapter, step);
 		p->steps++;
 		p->stepped = true;
-		dev_info(&adapter->pdev->dev, "PHC phase: error %lld ns, stepped %lld ns\n", median, step);
+		dev_info(&adapter->pdev->dev, "PHC phase: Error %lld ns, stepped %lld ns\n", median, step);
 		return;
 	case PHC_HELD:
 		if (abs(err) <= PHC_RESTEP_NS) {
@@ -453,7 +453,7 @@ static void phc_run(struct igb_adapter *adapter, bool locked)
 			return;
 		p->bad = 0;
 		p->state = PHC_ACQUIRE;
-		dev_warn(&adapter->pdev->dev, "PHC phase: error %lld ns, re-acquiring\n", err);
+		dev_warn(&adapter->pdev->dev, "PHC phase: Error %lld ns, re-acquiring\n", err);
 		return;
 	}
 }
@@ -485,7 +485,7 @@ static void pps_pull(struct igb_adapter *adapter, s64 err)
 	pa->pull_pending = true;
 	pa->pull_err = err;
 	pa->pull_step = step;
-	dev_info(&adapter->pdev->dev, "PPS: error %lld ns, slewing %lld ns, DPLL_REF_SYNC_PH_OFFSET 0x%llx -> 0x%llx\n",
+	dev_info(&adapter->pdev->dev, "PPS: Error %lld ns, slewing %lld ns, DPLL_REF_SYNC_PH_OFFSET 0x%llx -> 0x%llx\n",
 		 err, step, cur, val);
 }
 
@@ -500,17 +500,17 @@ static void pps_learn_scale(struct igb_adapter *adapter, s64 median)
 	if (abs(pa->pull_step) < PPS_LINK_PULL_NS)
 		return;
 	if (!moved || (moved > 0) != (pa->pull_step > 0)) {
-		dev_warn(&adapter->pdev->dev, "PPS: wanted slew of %lld ns, moved %lld ns, scale kept at %u ppm\n",
+		dev_warn(&adapter->pdev->dev, "PPS: Wanted slew of %lld ns, moved %lld ns, scale kept at %u ppm\n",
 			 pa->pull_step, moved, pa->scale_ppm);
 		return;
 	}
 	scale = div_s64((s64)pa->scale_ppm * pa->pull_step, moved);
 	if (scale < pa->scale_ppm / 4 || scale > (s64)pa->scale_ppm * 4) {
-		dev_warn(&adapter->pdev->dev, "PPS: wanted slew of %lld ns, moved %lld ns (???), scale kept at %u ppm\n",
+		dev_warn(&adapter->pdev->dev, "PPS: Wanted slew of %lld ns, moved %lld ns (???), scale kept at %u ppm\n",
 			 pa->pull_step, moved, pa->scale_ppm);
 		return;
 	}
-	dev_info(&adapter->pdev->dev, "PPS: wanted slew of %lld ns, moved %lld ns, scale %u -> %lld ppm\n",
+	dev_info(&adapter->pdev->dev, "PPS: Wanted slew of %lld ns, moved %lld ns, scale %u -> %lld ppm\n",
 		 pa->pull_step, moved, pa->scale_ppm, scale);
 	pa->scale_ppm = scale;
 }
@@ -654,7 +654,7 @@ static void move_work(struct work_struct *work)
 		m->failed = true;
 		m->active = true;
 	}
-	align_dbg(adapter, "PPS: slew event %u of %u, edges %u, target %lld ps, model %lld ps %lld ps/s\n",
+	align_dbg(adapter, "PPS: Slew event %u of %u, edges %u, target %lld ps, model %lld ps %lld ps/s\n",
 		  m->k, m->n, edges, m->target, m->y, m->i);
 out:
 	mutex_unlock(&m->lock);
@@ -678,8 +678,8 @@ static void pps_move_stop(struct igb_adapter *adapter, const char *why, bool fin
 	mutex_unlock(&m->lock);
 	cancel_delayed_work(&m->work);
 	if (was && why)
-		dev_warn(&adapter->pdev->dev, "PPS: slew stopped (%s)%s\n", why,
-			 finish ? ", DPLL_REF_SYNC_PH_OFFSET to go" : "");
+		dev_warn(&adapter->pdev->dev, "PPS: Slew stopped (%s)%s\n", why,
+			 finish ? ", DPLL_REF_SYNC_PH_OFFSET set to end point" : "");
 }
 
 static void pps_move_start(struct igb_adapter *adapter, s64 err)
@@ -736,7 +736,7 @@ static void pps_move_start(struct igb_adapter *adapter, s64 err)
 	pa->pull_step = step;
 	pa->early = false;
 	pa->state = PPS_MOVE;
-	dev_info(&adapter->pdev->dev, "PPS: error %lld ns, slewing %lld ns over %u s, DPLL_REF_SYNC_PH_OFFSET 0x%llx -> 0x%llx\n",
+	dev_info(&adapter->pdev->dev, "PPS: Error %lld ns, slewing %lld ns over %u s, DPLL_REF_SYNC_PH_OFFSET 0x%llx -> 0x%llx\n",
 		 err, step, m->n - m->skip, cur, move_reg(m, m->dist));
 }
 
@@ -746,13 +746,11 @@ static void pps_move_check(struct igb_adapter *adapter)
 	struct igb_pps_move *m = &pa->move;
 	unsigned long last;
 	bool done, failed;
-	u32 k;
 
 	mutex_lock(&m->lock);
 	done = m->done;
 	failed = m->failed;
 	last = m->last;
-	k = m->k - m->skip;
 	mutex_unlock(&m->lock);
 	if (failed || (!done && time_after(jiffies, last + PPS_MOVE_STALL_S * HZ))) {
 		pps_move_stop(adapter, failed ? "DPLL_REF_SYNC_PH_OFFSET write failed" : "no GNSS edges", true);
@@ -849,7 +847,7 @@ static void pps_run(struct igb_adapter *adapter, u8 r14, u8 r411)
 		if (ref && pa->wide)
 			break;
 		if (!ref)
-			dev_warn(&adapter->pdev->dev, "PPS: reference lost after adjustment, waiting\n");
+			dev_warn(&adapter->pdev->dev, "PPS: Reference lost after adjustment, waiting\n");
 		pa->state = PPS_WAIT;
 		return;
 	default:
@@ -886,7 +884,7 @@ static void pps_run(struct igb_adapter *adapter, u8 r14, u8 r411)
 		pa->have_pps = pa->have_gnss = false;
 		cap_flush(adapter, pps_extts, &pa->seen_pps);
 		cap_flush(adapter, gnss_extts, &pa->seen_gnss);
-		dev_info(&adapter->pdev->dev, "PPS: measuring\n");
+		dev_info(&adapter->pdev->dev, "PPS: Measuring\n");
 		return;
 	default:
 		break;
@@ -917,7 +915,7 @@ static void pps_run(struct igb_adapter *adapter, u8 r14, u8 r411)
 			return;
 		pa->n = 0;
 		if (!window_median(pa->win, &median)) {
-			dev_warn(&adapter->pdev->dev, "PPS: captures spread beyond %d ns, measuring again\n", ALIGN_SPREAD_NS);
+			dev_warn(&adapter->pdev->dev, "PPS: Captures spread beyond %d ns, measuring again\n", ALIGN_SPREAD_NS);
 			return;
 		}
 		if (pa->pull_pending)
@@ -973,7 +971,7 @@ static void pps_run(struct igb_adapter *adapter, u8 r14, u8 r411)
 		pa->bad = 0;
 		pa->state = PPS_MEASURE;
 		pa->n = 0;
-		dev_warn(&adapter->pdev->dev, "PPS: error %lld ns, slewing again\n", err);
+		dev_warn(&adapter->pdev->dev, "PPS: Error %lld ns, slewing again\n", err);
 		return;
 	default:
 		return;
@@ -998,7 +996,7 @@ static void link_power(struct igb_adapter *adapter, bool up)
 	else
 		igb_power_down_link(adapter);
 	rtnl_unlock();
-	//dev_info(&adapter->pdev->dev, "link %s\n", up ? "released" : "held down");
+	dev_info(&adapter->pdev->dev, "PHY: Link %s\n", up ? "released" : "held down");
 }
 
 bool igb_ref_link_allowed(struct igb_adapter *adapter)
@@ -1020,7 +1018,7 @@ const char *igb_ref_state(struct igb_adapter *adapter)
 void igb_link_gate_up(struct igb_adapter *adapter)
 {
 	if (!igb_ref_link_allowed(adapter)) {
-		dev_info(&adapter->pdev->dev, "PHY: time reference not ready, refusing link up\n");
+		dev_info(&adapter->pdev->dev, "PHY: Time reference not ready, refusing link up\n");
 		return;
 	}
 	igb_power_up_link(adapter);
@@ -1034,7 +1032,7 @@ void igb_ref_event(struct igb_adapter *adapter, const char *why)
 	if (!adapter->i2c_lmk05318b || !(phc_align || pps_align))
 		return;
 	if (r->latched)
-		dev_warn(&adapter->pdev->dev, "Time reference lost (%s): link down, PHC reads blocked\n", why);
+		dev_warn(&adapter->pdev->dev, "Time reference lost (%s)\n", why);
 	r->latched = false;
 	r->valid = false;
 	r->state = REF_ACQUIRE;
@@ -1132,7 +1130,7 @@ static void clk_run(struct igb_adapter *adapter)
 
 	if (fault) {
 		if (!c->bad) {
-			dev_warn(&adapter->pdev->dev, "PHC: clock skipped: GNSS pulses %lld ns off over %lld s, re-seeding at the next lock\n",
+			dev_warn(&adapter->pdev->dev, "PHC: Clock rate error of %lld ns over %lld s, re-seeding at next lock\n",
 				 dev, n);
 			igb_ref_event(adapter, "PHC clock fault");
 		}
@@ -1144,7 +1142,7 @@ static void clk_run(struct igb_adapter *adapter)
 		p->need_seed = true;
 	} else if (c->bad && time_after(jiffies, c->bad_until)) {
 		c->bad = false;
-		dev_info(&adapter->pdev->dev, "PHC: clock steady again\n");
+		dev_info(&adapter->pdev->dev, "PHC: Clock steady again\n");
 	}
 }
 
