@@ -158,6 +158,11 @@ static void igb_ptp_write_i210(struct igb_adapter *adapter,
 	adapter->phc_epoch++;	/* the clock check restarts its baseline */
 }
 
+static bool igb_ptp_time_refused(struct igb_adapter *adapter)
+{
+	return adapter->i2c_lmk05318b && phc_align && !igb_ref_time_valid(adapter);
+}
+
 /**
  *  igb_ptp_systim_to_hwtstamp - convert system time value to hw timestamp
  *  @adapter: board private structure
@@ -175,11 +180,6 @@ static void igb_ptp_write_i210(struct igb_adapter *adapter,
  *  In addition, here have extended the system time with an overflow
  *  counter in software.
  **/
-static bool igb_ptp_time_refused(struct igb_adapter *adapter)
-{
-	return adapter->i2c_lmk05318b && phc_align && !igb_ref_time_valid(adapter);
-}
-
 static void igb_ptp_systim_to_hwtstamp(struct igb_adapter *adapter,
 				       struct skb_shared_hwtstamps *hwtstamps,
 				       u64 systim)
@@ -268,7 +268,6 @@ static int igb_ptp_adjfreq_82576(struct ptp_clock_info *ptp, s32 ppb)
 	return ixgbe_ptp_adjfine_82576(info, scaled_ppm);
 }
 #endif /* HAVE_PTP_CLOCK_INFO_ADJFINE */
-
 
 static bool igb_ptp_user_locked(struct igb_adapter *adapter)
 {

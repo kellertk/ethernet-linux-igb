@@ -564,16 +564,16 @@ struct igb_phc_align {
 struct igb_pps_step {
 	struct delayed_work work;
 	struct mutex lock;
-	bool armed;		   /* tmreg_lock: GNSS edges queue the work */
-	u32 edges;		   /* tmreg_lock: GNSS edges since the start */
+	bool armed;			/* tmreg_lock: GNSS edges queue the work */
+	u32 edges;			/* tmreg_lock: GNSS edges since the start */
 	bool active, done, failed;
-	u32 k, n;		   /* TDC events taken, events in the step */
-	u32 skip;		   /* events before the profile starts */
-	s64 t[6], v[6];    /* velocity knots: us, ps/s */
-	s64 y, i;		   /* model output (ps) and integrator (ps/s) */
-	s64 target, dist;  /* ps */
+	u32 k, n;			/* TDC events taken, events in the step */
+	u32 skip;			/* events before the profile starts */
+	s64 t[6], v[6];			/* velocity knots: us, ps/s */
+	s64 y, i;			/* model output (ps) and integrator (ps/s) */
+	s64 target, dist;		/* ps */
 	int sign, kp, tau_ms;
-	u64 base;		   /* PH_OFFSET before the step */
+	u64 base;			/* PH_OFFSET before the step */
 	s64 cpn;
 	u32 scale_ppm;
 	unsigned long last;
@@ -592,20 +592,20 @@ struct igb_pps_align {
 	unsigned long lock_since, wait_until, last_reset;
 	bool far_logged;
 	bool wide, wide_unlocked;	/* DPLL loop widened for a step */
-	bool pull_pending;		    /* a pull's movement not yet measured */
+	bool pull_pending;		/* a pull's movement not yet measured */
 	s64 pull_err, pull_ns;
-	u32 scale_ppm;			    /* PH_OFFSET counts per datasheet count */
+	u32 scale_ppm;			/* PH_OFFSET counts per datasheet count */
 	u8 narrow_gain, narrow_quant;
 	unsigned long wide_since, flock_since;
 	bool ocxo_logged;
-	bool early;			        /* the landing may be measured at frequency lock */
+	bool early;			/* the landing may be measured at frequency lock */
 	struct igb_pps_step step;
 	s64 tail_t[PPS_TAIL_SAMPLES], tail_e[PPS_TAIL_SAMPLES];
 	u32 tail_n;
-	s64 tail_last;		        /* GNSS second of the last PPS sample */
+	s64 tail_last;			/* GNSS second of the last PPS sample */
 	unsigned long tail_since;
 };
-/* (igb_align.c): ready = DPLL locked, PPS aligned. */
+/* Reference state (igb_align.c): ready = DPLL locked, PPS aligned, PHC held. */
 enum { REF_ACQUIRE, REF_READY, REF_HOLDOVER, REF_RELOCK };
 struct dpll_device;
 struct dpll_pin;
@@ -891,7 +891,7 @@ struct igb_adapter {
         int dco_inc;
         int dco_dec;
         int dpll_flags; //DPLL_FLAGS_LOPL_DPLL DPLL_FLAGS_LOFL_DPLL DPLL_FLAGS_HLDOVR
-        u8 lmk_status[6];
+        u8 lmk_status[6]; /* R13 R14 R128 R167 R251 R411 */
         int ocxo_ready;
         unsigned long phc_resync_after;
         /* GNSS alignment loops (igb_align.c) */

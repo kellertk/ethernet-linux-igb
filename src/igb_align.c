@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Board 2049: The goal is to set the time of day in the PHC and align it with
+/* Board 2409: The goal is to set the time of day in the PHC and align it with
  * the GNSS pulse. The LMK05318B provides both the 25 MHz clock and the 1PPS,
  * so adjusting the LMK's phase will lock the PHC to GNSS. Startup can leave the
  * LMK in an undefined state, necessitating alignment with the GNSS pulse.
@@ -7,21 +7,21 @@
  * Two loops run from the DPLL worker on extts captures stored by
  * igb_tsync_interrupt. The PHC loop steps the PHC close to the GNSS pulse and
  * holds it there. The PPS loop measures the PPS output and pulls it into phase
- * with DPLL_REF_SYNC_PH_OFFSET (R340-R345). During a pull event, the DPLL loop
- * bandwidth is temporarily widened to allow the phase alignment to finish
- * faster. 
+ * with DPLL_REF_SYNC_PH_OFFSET (R340-R345): a slew for a small error, a step
+ * for a large one. During a step, the DPLL loop bandwidth is temporarily
+ * widened to allow the phase alignment to finish faster.
  *
- * The LMK has another quirk in that the DPLL integrator has a 682 ppm slew
- * limit, and at this speed it will overshoot the target and swing back. When we
- * detect such a move, we rewrite the PH_OFFSET to counteract the overshoot
- * using a model of that loop (Kp and Kp/Ki) as measured on the 2049 board.
+ * The LMK has another quirk in that the DPLL output has a 682 ppm slew limit,
+ * and at this speed the integrator winds up, overshoots the target and swings
+ * back. During a step, we rewrite the PH_OFFSET after every GNSS edge to
+ * counteract the overshoot using a model of that loop (Kp and Kp/Ki) as
+ * measured on the 2409 board.
  *
  * Before trying to adjust phase, the OCXO must be ready. Also, because a phase
  * adjustment also slews the I210 clock, we check that the PHC is counting whole
  * seconds and reseed the PHC if necessary. Also because of this, we keep the
  * PHY down until we're fully phase locked.
  */
-
 
 #include "igb.h"
 #include <linux/module.h>
@@ -83,36 +83,36 @@ int enable_user_phc_adjust = 0;
 module_param(enable_user_phc_adjust, int, S_IRUSR | S_IWUSR);
 MODULE_PARM_DESC(enable_user_phc_adjust, "accept adjtime/adjfine on the PHC from userspace (default 0)");
 
-#define LMK_R12				0x000c
-#define LMK_PH_OFFSET		0x0154	   /* R340, 45-bit two's complement, MSB first */
+#define LMK_R12			0x000c
+#define LMK_PH_OFFSET		0x0154		/* R340, 45-bit two's complement, MSB first */
 #define LMK_PH_OFFSET_MASK	((1ULL << 45) - 1)
-#define LMK_R252			0x00fc	   /* bit 0 DPLL_LOOP_EN */
-#define LMK_FILT_SCALAR		0x010e	   /* R270[1:0]:R271 DPLL_REF_FILT_SCALAR */
-#define LMK_LOOP_GAIN		0x0113	   /* R275 main LOOP_GAIN (undocumented; TICS Pro field map) */
-#define LMK_QUANT			0x0128 	   /* R296 main QUANT */
-#define PPS_SETTLE_S		4	
+#define LMK_R252		0x00fc		/* bit 0 DPLL_LOOP_EN */
+#define LMK_FILT_SCALAR		0x010e		/* R270[1:0]:R271 DPLL_REF_FILT_SCALAR */
+#define LMK_LOOP_GAIN		0x0113		/* R275 main LOOP_GAIN (undocumented; TICS Pro field map) */
+#define LMK_QUANT		0x0128		/* R296 main QUANT */
+#define PPS_SETTLE_S		4
 #define PPS_SLEW_WAIT_S		60
-#define ALIGN_SPREAD_NS		2000	   /* a window wider than this is a glitch */
-#define PHC_HELD_NS			500
+#define ALIGN_SPREAD_NS		2000		/* a window wider than this is a glitch */
+#define PHC_HELD_NS		500
 #define PHC_RESTEP_NS		1000
-#define PHC_LAT_LEARN_NS	100000	   /* a residual beyond this is not the step latency */
+#define PHC_LAT_LEARN_NS	100000		/* a residual beyond this is not the step latency */
 #define PHC_LAT_MAX_NS		50000
 #define PPS_ALIGNED_NS		1000
 #define PPS_REPULL_NS		2000
 #define PPS_RESYNC_NS		100000000	/* a far landing is re-synced instead of pulled */
 #define PPS_RESYNC_HOLDOFF_S	600
-#define PPS_STEP_NS	1000000	    /* this far off is a step: OUT0 slews for minutes, the link goes down */
-#define PPS_STEP_RAMP_US	8000000	    /* a step changes its rate over this long */
-#define PPS_STEP_DELAY_MS	100	        /* PH_OFFSET rewritten this long after a GNSS edge, clear of the TDC */
+#define PPS_STEP_NS		1000000		/* this far off is a step: OUT0 slews for minutes, the link goes down */
+#define PPS_STEP_RAMP_US	8000000		/* a step changes its rate over this long */
+#define PPS_STEP_DELAY_MS	100		/* PH_OFFSET rewritten this long after a GNSS edge, clear of the TDC */
 #define PPS_STEP_STALL_S	5
-#define PPS_TAIL_SETTLE_S	10	        /* after a step, before the PPS slope is fitted */
-#define PPS_WIDE_FLOCK_S	600	        /* frequency-locked this long without phase lock: narrow anyway */
-#define PPS_WIDE_MAX_S		1800	    /* never leave the loop wide longer than this */
-#define REF_CAP_STALE_S		3		    /* no GNSS capture this long with PRIREF valid = capture path dead */
-#define REF_REARM_S			30
-#define CLK_FAULT_PPM		5000	    /* the DPLL slews OUT0 at about 1000 ppm at most */
-#define CLK_CHECK_MAX_S		10	        /* longer gaps restart the baseline */
-#define CLK_FAULT_HOLD_S	10	        /* this long without a fault = steady again */
+#define PPS_TAIL_SETTLE_S	10		/* after a step, before the PPS slope is fitted */
+#define PPS_WIDE_FLOCK_S	600		/* frequency-locked this long without phase lock: narrow anyway */
+#define PPS_WIDE_MAX_S		1800		/* never leave the loop wide longer than this */
+#define REF_CAP_STALE_S		3		/* no GNSS capture this long with PRIREF valid = capture path dead */
+#define REF_REARM_S		30
+#define CLK_FAULT_PPM		5000		/* the DPLL slews OUT0 at about 1000 ppm at most */
+#define CLK_CHECK_MAX_S		10		/* longer gaps restart the baseline */
+#define CLK_FAULT_HOLD_S	10		/* this long without a fault = steady again */
 
 static const char *phc_states[] = { "wait", "acquire", "held" };
 static const char *pps_states[] = { "wait", "settle", "measure", "slew", "aligned", "step", "tail" };
@@ -209,7 +209,7 @@ static void pps_loop_wide(struct igb_adapter *adapter)
 			lmk_wr(adapter, LMK_LOOP_GAIN, g);
 			lmk_wr(adapter, LMK_QUANT, q);
 		}
-		dev_warn(&adapter->pdev->dev, "PPS: DPLL loop gain write failed, stepping without adjusting LBW\n");
+		dev_warn(&adapter->pdev->dev, "PPS: DPLL bandwidth gain write failed, stepping without adjusting LBW\n");
 		return;
 	}
 	pa->narrow_gain = g;
@@ -218,7 +218,7 @@ static void pps_loop_wide(struct igb_adapter *adapter)
 	pa->wide_unlocked = false;
 	pa->wide_since = jiffies;
 	pa->flock_since = 0;
-	dev_info(&adapter->pdev->dev, "PPS: DPLL loop widened for the step: LOOP_GAIN %d -> %d, QUANT %d -> %d\n",
+	dev_info(&adapter->pdev->dev, "PPS: DPLL bandwidth widened for clock step: LOOP_GAIN %d -> %d, QUANT %d -> %d\n",
 		 g, pull_loop_gain, q, pull_quant);
 }
 
@@ -991,12 +991,15 @@ static void link_power(struct igb_adapter *adapter, bool up)
 		adapter->ref.link_pending = up ? 1 : -1;
 		return;
 	}
-	if (up)
+	if (up) {
 		igb_power_up_link(adapter);
-	else
+		dev_info(&adapter->pdev->dev, "PHY: Link enabled\n");
+	} else {
 		igb_power_down_link(adapter);
+		dev_dbg(&adapter->pdev->dev, "PHY: Link held down\n");
+	}
 	rtnl_unlock();
-	dev_info(&adapter->pdev->dev, "PHY: Link %s\n", up ? "released" : "held down");
+
 }
 
 bool igb_ref_link_allowed(struct igb_adapter *adapter)
@@ -1018,7 +1021,7 @@ const char *igb_ref_state(struct igb_adapter *adapter)
 void igb_link_gate_up(struct igb_adapter *adapter)
 {
 	if (!igb_ref_link_allowed(adapter)) {
-		dev_info(&adapter->pdev->dev, "PHY: Time reference not ready, refusing link up\n");
+		dev_info(&adapter->pdev->dev, "PHY: Clock reference not ready, refusing link up\n");
 		return;
 	}
 	igb_power_up_link(adapter);
@@ -1032,7 +1035,7 @@ void igb_ref_event(struct igb_adapter *adapter, const char *why)
 	if (!adapter->i2c_lmk05318b || !(phc_align || pps_align))
 		return;
 	if (r->latched)
-		dev_warn(&adapter->pdev->dev, "Time reference lost (%s)\n", why);
+		dev_warn(&adapter->pdev->dev, "Clock reference lost (%s)\n", why);
 	r->latched = false;
 	r->valid = false;
 	r->state = REF_ACQUIRE;
@@ -1040,7 +1043,8 @@ void igb_ref_event(struct igb_adapter *adapter, const char *why)
 	igb_dpll_notify(adapter);
 }
 
-/* DPLL_LOOP_EN off: the DPLL cannot lock; the outputs, OUT0 (the I210 clock) and the PHC, are not reliable */
+/* DPLL_LOOP_EN off: the DPLL cannot lock; the outputs, OUT0 (the I210 clock)
+ * and the PHC, are not reliable */
 void igb_dpll_hold(struct igb_adapter *adapter, bool hold)
 {
 	struct igb_ref *r = &adapter->ref;
@@ -1056,7 +1060,7 @@ void igb_dpll_hold(struct igb_adapter *adapter, bool hold)
 		return;
 	}
 	r->dpll_held = hold;
-	dev_info(&adapter->pdev->dev, "%s\n", hold ? "DPLL waiting until OCXO ready" : "DPLL released: OCXO ready");
+	dev_info(&adapter->pdev->dev, "%s\n", hold ? "DPLL: waiting until OCXO ready" : "DPLL: OCXO ready");
 }
 
 static bool gnss_fresh(struct igb_adapter *adapter)

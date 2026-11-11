@@ -5879,7 +5879,7 @@ static int __igb_open(struct net_device *netdev, bool resuming)
 	schedule_work(&adapter->watchdog_task);
 
 	if(adapter->i2c_lmk05318b) queue_work(system_unbound_wq, &adapter->dpll_task);
-    if(adapter->i2c_dac1) queue_work(system_unbound_wq, &adapter->vcodac_task);
+	if(adapter->i2c_dac1) queue_work(system_unbound_wq, &adapter->vcodac_task);
 
 	return E1000_SUCCESS;
 
@@ -7581,7 +7581,7 @@ static void vcodac_task(struct work_struct *work)
                         if(dacval_old != dacval && adapter->dac1val_hist != 0) {
                                 adapter->dac1val = dacval_old = dacval;
                                 res = mcp4725_set_value(adapter );
-                                if(!res && debug > 0) dev_info(&adapter->pdev->dev, "VCO Tuning word update. mode:%s, (%i/%i) DAC:%i", vco_mode==1 ? "freq" : vco_mode==2 ? "phase" : "disabled", adapter->dac1val_hist, dacval_hist_interval, adapter->dac1val);
+                                if(!res && debug > 0) dev_info(&adapter->pdev->dev, "VCO: Tuning word update. mode:%s, (%i/%i) DAC:%i", vco_mode==1 ? "freq" : vco_mode==2 ? "phase" : "disabled", adapter->dac1val_hist, dacval_hist_interval, adapter->dac1val);
                         }
                         dac1val_histi = 0;
                         adapter->dac1val_hist = 0;
@@ -7738,10 +7738,10 @@ static void igb_dpll_task(struct work_struct *work)
                         if (!init && !ocxoready)
                                 igb_dpll_hold(adapter, true);
                         if(!init || ocxoready != ocxoready_old) {
-                                dev_warn(&adapter->pdev->dev, "OCXO %s (temperature = %li C)\n", ocxoready ? "ready" : "heating up", temp / 2000);
+                                dev_warn(&adapter->pdev->dev, "OCXO: %s (temperature = %li C)\n", ocxoready ? "ready" : "heating up", temp / 2000);
                                 if(init && ocxoready) {
                                         igb_dpll_hold(adapter, false);
-                                        dev_warn(&adapter->pdev->dev, "APLLx VCO Calibration Active"); /*start lmk calibration*/
+                                        dev_warn(&adapter->pdev->dev, "DPLL: APLLx VCO Calibration Active"); /*start lmk calibration*/
                                         igb_lmk_reset(adapter);
                                 }
                                 ocxoready_old = ocxoready;
@@ -7772,8 +7772,8 @@ static void igb_dpll_task(struct work_struct *work)
                         u8 dpll_pllnumsat_hi, dpll_pllnumsat_lo;
                         dpll_pllnumsat_lo = (lmkregs[128] & 0x01) ? 0x01 : 0x00;
                         dpll_pllnumsat_hi = (lmkregs[128] & 0x02) ? 0x01 : 0x00;
-                        if(!init || (lmkregs[128] & 0x01) != (lmkregs_old[128] & 0x01) ) dev_err(&adapter->pdev->dev, "PLL1 Numerator saturation low status");
-                        if(!init || (lmkregs[128] & 0x02) != (lmkregs_old[128] & 0x02) ) dev_err(&adapter->pdev->dev, "PLL1 Numerator saturation high status");
+                        if(!init || (lmkregs[128] & 0x01) != (lmkregs_old[128] & 0x01) ) dev_warn(&adapter->pdev->dev, "DPLL: PLL1 Numerator saturation low status");
+                        if(!init || (lmkregs[128] & 0x02) != (lmkregs_old[128] & 0x02) ) dev_warn(&adapter->pdev->dev, "DPLL: PLL1 Numerator saturation high status");
                         lmkregs_old[128] = lmkregs[128];
                 }
 
@@ -7781,8 +7781,8 @@ static void igb_dpll_task(struct work_struct *work)
                         u8 dpll_refpriv, dpll_refsecv;
                         dpll_refpriv = (lmkregs[411] & 0x04) ? 0x01 : 0x00;
                         dpll_refsecv = (lmkregs[411] & 0x08) ? 0x01 : 0x00;
-                        if(!init || (lmkregs[411] & 0x04) != (lmkregs_old[411] & 0x04) ) dev_warn(&adapter->pdev->dev, "DPLL PRIREF %svalid", dpll_refpriv ? "" : "in");
-                        if(!init || (lmkregs[411] & 0x08) != (lmkregs_old[411] & 0x08) ) dev_warn(&adapter->pdev->dev, "DPLL SECREF %svalid", dpll_refsecv ? "" : "in");
+                        if(!init || (lmkregs[411] & 0x04) != (lmkregs_old[411] & 0x04) ) dev_warn(&adapter->pdev->dev, "DPLL: PRIREF %svalid", dpll_refpriv ? "" : "in");
+                        if(!init || (lmkregs[411] & 0x08) != (lmkregs_old[411] & 0x08) ) dev_warn(&adapter->pdev->dev, "DPLL: SECREF %svalid", dpll_refsecv ? "" : "in");
                         lmkregs_old[411] = lmkregs[411];
                 }
 
@@ -7790,9 +7790,9 @@ static void igb_dpll_task(struct work_struct *work)
                         u8 dpll__refsel_stat;
                         dpll__refsel_stat = (lmkregs[167] & 0x03);
                         if(!init || (lmkregs[167] & 0x03) != (lmkregs_old[167] & 0x03) ) {
-                                if (dpll__refsel_stat == 0x00) dev_warn(&adapter->pdev->dev, "DPLL holdover selected");
-                                if (dpll__refsel_stat == 0x01) dev_info(&adapter->pdev->dev, "DPLL PRIREF selected");
-                                if (dpll__refsel_stat == 0x02) dev_info(&adapter->pdev->dev, "DPLL SECREF selected");
+                                if (dpll__refsel_stat == 0x00) dev_warn(&adapter->pdev->dev, "DPLL: holdover selected");
+                                if (dpll__refsel_stat == 0x01) dev_info(&adapter->pdev->dev, "DPLL: PRIREF selected");
+                                if (dpll__refsel_stat == 0x02) dev_info(&adapter->pdev->dev, "DPLL: SECREF selected");
                         }
                         lmkregs_old[167] = lmkregs[167];
                 }
@@ -7835,12 +7835,12 @@ eec_invalid_value          0
                 }
 
 
-                        if(!init || (lmkregs[14] & 0x40) != (lmkregs_old[14] & 0x40) ) dev_warn(&adapter->pdev->dev, "DPLL %s", dpll_fl ? "frequency locked" : "loss of frequency lock");
-                        if(!init || (lmkregs[14] & 0x80) != (lmkregs_old[14] & 0x80) ) dev_warn(&adapter->pdev->dev, "DPLL %s", dpll_pl ? "loop phase locked, PPS alignment pending" : "loss of phase lock");
-                        if(         (lmkregs[14] & 0x20) != (lmkregs_old[14] & 0x20) && dpll_hist) dev_warn(&adapter->pdev->dev, "DPLL Tuning word history update (%s)", datetimestring);
-                        if(         (lmkregs[14] & 0x20) != (lmkregs_old[14] & 0x20) && dpll_hist && vco_mode && adapter->i2c_dac1) dev_warn(&adapter->pdev->dev, "VCO Tuning word update (%i/%i) DAC:%i", adapter->dac1val_hist, dacval_hist_interval, adapter->dac1val );
-                        if(         (lmkregs[14] & 0x10) != (lmkregs_old[14] & 0x10) ) dev_warn(&adapter->pdev->dev, "DPLL Holdover event %s", dpll_hold ? "start" : "end");
-                        if(         (lmkregs[14] & 0x08) != (lmkregs_old[14] & 0x08) ) dev_warn(&adapter->pdev->dev, "DPLL Reference switchover  %s", dpll_refswitch ? "1" : "0");
+                        if(!init || (lmkregs[14] & 0x40) != (lmkregs_old[14] & 0x40) ) dev_warn(&adapter->pdev->dev, "DPLL: %s", dpll_fl ? "frequency locked" : "loss of frequency lock");
+                        if(!init || (lmkregs[14] & 0x80) != (lmkregs_old[14] & 0x80) ) dev_warn(&adapter->pdev->dev, "DPLL: %s", dpll_pl ? "loop phase locked, PPS alignment pending" : "loss of phase lock");
+                        if(         (lmkregs[14] & 0x20) != (lmkregs_old[14] & 0x20) && dpll_hist) dev_warn(&adapter->pdev->dev, "DPLL: Tuning word history update (%s)", datetimestring);
+                        if(         (lmkregs[14] & 0x20) != (lmkregs_old[14] & 0x20) && dpll_hist && vco_mode && adapter->i2c_dac1) dev_warn(&adapter->pdev->dev, "DPLL: VCO Tuning word update (%i/%i) DAC:%i", adapter->dac1val_hist, dacval_hist_interval, adapter->dac1val );
+                        if(         (lmkregs[14] & 0x10) != (lmkregs_old[14] & 0x10) ) dev_warn(&adapter->pdev->dev, "DPLL: Holdover event %s", dpll_hold ? "start" : "end");
+                        if(         (lmkregs[14] & 0x08) != (lmkregs_old[14] & 0x08) ) dev_warn(&adapter->pdev->dev, "DPLL: Reference switchover  %s", dpll_refswitch ? "1" : "0");
 
                         if(dpll_pl) adapter->ledctl |= 0x02; else adapter->ledctl &= ~0x02;
                         lmkregs_old[14] = lmkregs[14];
@@ -7859,14 +7859,14 @@ eec_invalid_value          0
                 }
 
                 if(!init || lmkregs[251] != lmkregs_old[251] ) {
-                        if(!init || (lmkregs[251] & 0x03) != (lmkregs_old[251] & 0x03) ) dev_warn(&adapter->pdev->dev, "DPLL switchover mode: %s",
+                        if(!init || (lmkregs[251] & 0x03) != (lmkregs_old[251] & 0x03) ) dev_warn(&adapter->pdev->dev, "DPLL: switchover mode: %s",
                                 (lmkregs[251] & 0x03) == 0x00 ? "Auto non-revertive" :
                                 (lmkregs[251] & 0x03) == 0x01 ? "Auto revertive" :
                                 (lmkregs[251] & 0x03) == 0x02 ? "Manual fallback" :
                                         (lmkregs[251] & 0x03) == 0x03 ? "Manual holdover" : "");
-                        if(!init || (lmkregs[251] & 0x20) != (lmkregs_old[251] & 0x20) ) dev_warn(&adapter->pdev->dev, "DPLL Source of manual selection: %s",
+                        if(!init || (lmkregs[251] & 0x20) != (lmkregs_old[251] & 0x20) ) dev_warn(&adapter->pdev->dev, "DPLL: Source of manual selection: %s",
                                 (lmkregs[251] & 0x20) ? "Hardware pin REFSEL" : "Software register DPLL_REF_MAN_REG_SEL");
-                        if(         ((lmkregs[251] & 0x20) == 0x00) && (!init ||(lmkregs[251] & 0x10) != (lmkregs_old[251] & 0x10)) ) dev_warn(&adapter->pdev->dev, "DPLL Software manual Ref selection: %s",
+                        if(         ((lmkregs[251] & 0x20) == 0x00) && (!init ||(lmkregs[251] & 0x10) != (lmkregs_old[251] & 0x10)) ) dev_warn(&adapter->pdev->dev, "DPLL: Software manual Ref selection: %s",
                                 (lmkregs[251] & 0x10) ? "Secondary" : "Primary");
                         lmkregs_old[251] = lmkregs[251];
                 }
@@ -7941,7 +7941,7 @@ if( ledctl_old != adapter->ledctl ) {
                         if( adapter->dco_step ) i2c_smbus_write_word_data(adapter->i2c_lmk05318b, 0x01, 0x5f | ( 0x01 << 8)); //DPLL_FDEV_EN = 1
                         else i2c_smbus_write_word_data(adapter->i2c_lmk05318b, 0x01, 0x5f | ( 0x00 << 8)); //DPLL_FDEV_EN = 0
 
-                        netdev_err(adapter->netdev, "DPLL DCO %sabled, step=%i\n", adapter->dco_step ? "en" : "dis", adapter->dco_step);
+                        netdev_err(adapter->netdev, "DPLL: DCO %sabled, step=%i\n", adapter->dco_step ? "en" : "dis", adapter->dco_step);
                 }
 
                 igb_align_run(adapter, lmkregs[14], lmkregs[411], lmkregs[167]);
@@ -7960,7 +7960,7 @@ nolmk:
                 adapter->i2c_lmk05318b = 0;
         }
 
-        netdev_err(adapter->netdev, "DPLL worker stop\n");
+        netdev_err(adapter->netdev, "DPLL: worker stop\n");
 }
                         
 
