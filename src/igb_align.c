@@ -69,6 +69,10 @@ int pps_narrow_ns = 500;
 module_param(pps_narrow_ns, int, S_IRUSR | S_IWUSR);
 MODULE_PARM_DESC(pps_narrow_ns, "set DPLL to narrow LBW once phase error is below this value, ns (default 500)");
 
+int pps_max_err = 20;
+module_param(pps_max_err, int, S_IRUSR | S_IWUSR);
+MODULE_PARM_DESC(pps_max_err, "largest PPS error accepted as aligned, ns (default 20)");
+
 int pps_extts = 0;
 module_param(pps_extts, int, S_IRUSR);
 MODULE_PARM_DESC(pps_extts, "extts channel carrying the PPS (default 0 = SDP0)");
@@ -99,7 +103,6 @@ MODULE_PARM_DESC(enable_user_phc_adjust, "accept adjtime/adjfine on the PHC from
 #define PHC_RESTEP_NS		1000
 #define PHC_LAT_LEARN_NS	100000		/* a residual beyond this is not the step latency */
 #define PHC_LAT_MAX_NS		50000
-#define PPS_ALIGNED_NS		1000
 #define PPS_REPULL_NS		2000
 #define PPS_RESYNC_NS		100000000	/* a far landing is re-synced instead of pulled */
 #define PPS_RESYNC_HOLDOFF_S	600
@@ -815,8 +818,8 @@ static void pps_tail(struct igb_adapter *adapter, u64 gnss, s64 err)
 	den = n * stt - st * st;
 	if (den <= 0 || abs(num) * pps_step_tau_ms >= (s64)pps_narrow_ns * 1000 * den)
 		return;
-	dev_info(&adapter->pdev->dev, "PPS: %lld ns left after the step (slope over %d s)\n",
-		 div64_s64(num * pps_step_tau_ms, den * 1000), PPS_TAIL_SAMPLES);
+	dev_info(&adapter->pdev->dev, "PPS: %lld ns estimated drift remaining after offset adjustment, waiting for phase lock\n",
+		 div64_s64(num * pps_step_tau_ms, den * 1000));
 	pps_loop_narrow(adapter, "stepped");
 	pa->state = PPS_WAIT;
 }
@@ -878,8 +881,7 @@ static void pps_run(struct igb_adapter *adapter, u8 r14, u8 r411)
 		pa->ocxo_logged = false;
 		pa->state = PPS_SETTLE;
 		pa->lock_since = jiffies;
-		dev_info(&adapter->pdev->dev, "PPS: DPLL %s locked, settling %d s\n", plock ? "phase" : "frequency",
-			 PPS_SETTLE_S);
+		dev_info(&adapter->pdev->dev, "PPS: DPLL %s locked, measuring\n", plock ? "phase" : "frequency");
 		return;
 	case PPS_SLEW:
 		if (time_before(jiffies, pa->wait_until))
@@ -893,7 +895,6 @@ static void pps_run(struct igb_adapter *adapter, u8 r14, u8 r411)
 		pa->have_pps = pa->have_gnss = false;
 		cap_flush(adapter, pps_extts, &pa->seen_pps);
 		cap_flush(adapter, gnss_extts, &pa->seen_gnss);
-		dev_info(&adapter->pdev->dev, "PPS: Measuring\n");
 		return;
 	default:
 		break;
@@ -929,7 +930,7 @@ static void pps_run(struct igb_adapter *adapter, u8 r14, u8 r411)
 		}
 		if (pa->pull_pending)
 			pps_learn_scale(adapter, median);
-		if (abs(median) < PPS_ALIGNED_NS && plock) {
+		if (abs(median) <= clamp(pps_max_err, 1, PPS_REPULL_NS) && plock) {
 			pa->state = PPS_ALIGNED;
 			pa->early = false;
 			dev_info(&adapter->pdev->dev, "PPS aligned: %lld ns, DPLL_REF_SYNC_PH_OFFSET 0x%llx after %u writes\n",
@@ -1142,7 +1143,7 @@ static void clk_run(struct igb_adapter *adapter)
 
 	if (fault) {
 		if (!c->bad) {
-			dev_warn(&adapter->pdev->dev, "PHC: Clock rate error of %lld ns over %lld s, re-seeding at next lock\n",
+			dev_warn(&adapter->pdev->dev, "PHC: Clock rate error of %lld ns over %lld s, re-seeding\n",
 				 dev, n);
 			igb_ref_event(adapter, "PHC clock fault");
 		}
