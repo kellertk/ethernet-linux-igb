@@ -575,7 +575,7 @@ struct igb_pps_step {
 	int sign, kp, tau_ms;
 	u64 base;			/* PH_OFFSET before the step */
 	s64 cpn;
-	u32 scale_ppm;
+	u32 scale_ppb;
 	unsigned long last;
 };
 struct igb_pps_align {
@@ -594,7 +594,7 @@ struct igb_pps_align {
 	bool wide, wide_unlocked;	/* DPLL loop widened for a step */
 	bool pull_pending;		/* a pull's movement not yet measured */
 	s64 pull_err, pull_ns;
-	u32 scale_ppm;			/* PH_OFFSET counts per datasheet count */
+	u32 scale_ppb;			/* PH_OFFSET counts per datasheet count */
 	u8 narrow_gain, narrow_quant;
 	unsigned long wide_since, flock_since;
 	bool ocxo_logged;

@@ -275,7 +275,7 @@ static ssize_t pps_align_show(struct device *dev, struct device_attribute *attr,
 		return -ENODEV;
 	return sprintf(buf, "%s err=%lld reg=0x%llx writes=%u wide=%d scale=%u\n", igb_pps_align_state(adapter),
 		       adapter->pps.err, adapter->pps.reg, adapter->pps.writes, adapter->pps.wide,
-		       adapter->pps.scale_ppm);
+		       adapter->pps.scale_ppb);
 }
 static DEVICE_ATTR_RO(pps_align);
 

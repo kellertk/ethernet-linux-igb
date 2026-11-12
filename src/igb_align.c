@@ -45,9 +45,9 @@ int pull_quant = 3;
 module_param(pull_quant, int, S_IRUSR | S_IWUSR);
 MODULE_PARM_DESC(pull_quant, "DPLL main QUANT (R296) during phase adjustment (default 3 = 0.1 Hz)");
 
-int pull_scale = 500000;
-module_param(pull_scale, int, S_IRUSR);
-MODULE_PARM_DESC(pull_scale, "first prediction of how far a PH_OFFSET write moves the PPS, ppm of the datasheet counts (default 500000 = moves twice as far; corrected from each measured step)");
+unsigned int pull_scale = 500000000;
+module_param(pull_scale, uint, S_IRUSR);
+MODULE_PARM_DESC(pull_scale, "prediction of how far a PH_OFFSET write moves the PPS, ppb (default 500000000)");
 
 int pps_step_ppm = 550;
 module_param(pps_step_ppm, int, S_IRUSR | S_IWUSR);
@@ -460,6 +460,13 @@ static void phc_run(struct igb_adapter *adapter, bool locked)
 	}
 }
 
+static s64 pull_counts(s64 v, u32 scale_ppb, u64 div)
+{
+	u64 n = mul_u64_u64_div_u64(abs(v), scale_ppb, div * 1000000000ULL);
+
+	return v < 0 ? -(s64)n : n;
+}
+
 static void pps_slew(struct igb_adapter *adapter, s64 err)
 {
 	struct igb_pps_align *pa = &adapter->pps;
@@ -475,9 +482,9 @@ static void pps_slew(struct igb_adapter *adapter, s64 err)
 		dev_warn(&adapter->pdev->dev, "PPS: DPLL_REF_SYNC_PH_OFFSET read failed\n");
 		return;
 	}
-	if (!pa->scale_ppm)
-		pa->scale_ppm = clamp(pull_scale, 100000, 4000000);
-	counts = div_s64(div_s64(adj * cpn, 1000) * pa->scale_ppm, 1000);
+	if (!pa->scale_ppb)
+		pa->scale_ppb = clamp(pull_scale, 100000000U, 4000000000U);
+	counts = pull_counts(adj * cpn, pa->scale_ppb, 1);
 	val = (cur + counts) & LMK_PH_OFFSET_MASK;
 	if (lmk_wr_offset(adapter, val) < 0) {
 		dev_warn(&adapter->pdev->dev, "PPS: DPLL_REF_SYNC_PH_OFFSET write failed\n");
@@ -502,19 +509,19 @@ static void pps_learn_scale(struct igb_adapter *adapter, s64 median)
 	if (abs(pa->pull_ns) < PPS_STEP_NS)
 		return;
 	if (!moved || (moved > 0) != (pa->pull_ns > 0)) {
-		dev_warn(&adapter->pdev->dev, "PPS: Wanted step of %lld ns, moved %lld ns, scale kept at %u ppm\n",
-			 pa->pull_ns, moved, pa->scale_ppm);
+		dev_warn(&adapter->pdev->dev, "PPS: Wanted step of %lld ns, moved %lld ns, scale kept at %u ppb\n",
+			 pa->pull_ns, moved, pa->scale_ppb);
 		return;
 	}
-	scale = div_s64((s64)pa->scale_ppm * pa->pull_ns, moved);
-	if (scale < pa->scale_ppm / 4 || scale > (s64)pa->scale_ppm * 4) {
-		dev_warn(&adapter->pdev->dev, "PPS: Wanted step of %lld ns, moved %lld ns (???), scale kept at %u ppm\n",
-			 pa->pull_ns, moved, pa->scale_ppm);
+	scale = div64_u64((u64)pa->scale_ppb * abs(pa->pull_ns) + abs(moved) / 2, abs(moved));
+	if (scale < pa->scale_ppb / 4 || scale > (s64)pa->scale_ppb * 4) {
+		dev_warn(&adapter->pdev->dev, "PPS: Wanted step of %lld ns, moved %lld ns (???), scale kept at %u ppb\n",
+			 pa->pull_ns, moved, pa->scale_ppb);
 		return;
 	}
-	dev_info(&adapter->pdev->dev, "PPS: Wanted step of %lld ns, moved %lld ns, scale %u -> %lld ppm\n",
-		 pa->pull_ns, moved, pa->scale_ppm, scale);
-	pa->scale_ppm = scale;
+	dev_info(&adapter->pdev->dev, "PPS: Wanted step of %lld ns, moved %lld ns, scale %u -> %lld ppb\n",
+		 pa->pull_ns, moved, pa->scale_ppb, scale);
+	pa->scale_ppb = clamp_t(s64, scale, 100000000, 4000000000LL);
 }
 
 /* A step's velocity is a trapezoid up to +r, across to -r and back to zero
@@ -609,7 +616,7 @@ static void step_plan(struct igb_pps_step *m, s64 dist, s64 r)
 
 static u64 step_reg(const struct igb_pps_step *m, s64 target)
 {
-	s64 counts = div_s64(div_s64(m->sign * target * m->cpn, 1000) * m->scale_ppm, 1000000);
+	s64 counts = pull_counts(m->sign * target * m->cpn, m->scale_ppb, 1000);
 
 	return (m->base + counts) & LMK_PH_OFFSET_MASK;
 }
@@ -699,8 +706,8 @@ static void pps_step_start(struct igb_adapter *adapter, s64 err)
 	}
 	igb_ref_event(adapter, "PPS step");
 	pps_loop_wide(adapter);
-	if (!pa->scale_ppm)
-		pa->scale_ppm = clamp(pull_scale, 100000, 4000000);
+	if (!pa->scale_ppb)
+		pa->scale_ppb = clamp(pull_scale, 100000000U, 4000000000U);
 	mutex_lock(&m->lock);
 	m->kp = clamp(pps_step_kp, 100, 1500);
 	m->tau_ms = clamp(pps_step_tau_ms, 10000, 2000000);
@@ -713,7 +720,7 @@ static void pps_step_start(struct igb_adapter *adapter, s64 err)
 	m->dist = dist;
 	m->base = cur;
 	m->cpn = cpn;
-	m->scale_ppm = pa->scale_ppm;
+	m->scale_ppb = pa->scale_ppb;
 	m->y = 0;
 	m->i = 0;
 	m->k = 0;
